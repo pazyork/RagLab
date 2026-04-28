@@ -523,6 +523,5 @@ def serve_cmd(
     port: int = typer.Option(8080, "--port", help="Port to listen on"),
 ) -> None:
     """Start the NiceGUI web interface."""
-    from raglab.ui.app import create_app
-    nicegui_app = create_app()
-    nicegui_app.run(host="0.0.0.0", port=port)
+    from raglab.ui.app import run_app
+    run_app(host="0.0.0.0", port=port)

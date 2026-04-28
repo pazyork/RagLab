@@ -31,3 +31,9 @@ def create_app():
                 render_settings()
 
     return app
+
+
+def run_app(host: str = "0.0.0.0", port: int = 8080):
+    """Create the app and start the NiceGUI server."""
+    create_app()
+    ui.run(host=host, port=port, title="RagLab", reload=False)

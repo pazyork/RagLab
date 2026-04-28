@@ -183,11 +183,6 @@ class TestSplit:
 
 
 class TestServe:
-    def test_serve_placeholder(self):
-        result = runner.invoke(app, ["serve"])
-        assert result.exit_code == 0
-        assert "coming soon" in result.output.lower()
-
     def test_serve_help(self):
         result = runner.invoke(app, ["serve", "--help"])
         assert result.exit_code == 0
