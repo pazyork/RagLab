@@ -44,5 +44,12 @@
   "msg.complete": "Evaluation complete",
   "msg.error_api": "API call failed",
   "msg.confirm_delete": "Confirm deletion?",
-  "msg.saved": "Saved"
+  "msg.saved": "Saved",
+  "label.upload_file": "Upload File",
+  "label.select_case": "Select Case",
+  "label.history": "History",
+  "label.status": "Status",
+  "label.run_at": "Run At",
+  "msg.no_query": "Please enter a query",
+  "msg.no_runs": "No evaluation runs yet"
 }

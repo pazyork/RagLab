@@ -44,5 +44,12 @@
   "msg.complete": "评测完成",
   "msg.error_api": "API 调用失败",
   "msg.confirm_delete": "确认删除？",
-  "msg.saved": "已保存"
+  "msg.saved": "已保存",
+  "label.upload_file": "上传文件",
+  "label.select_case": "选择用例",
+  "label.history": "历史记录",
+  "label.status": "状态",
+  "label.run_at": "运行时间",
+  "msg.no_query": "请输入查询词",
+  "msg.no_runs": "暂无评测记录"
 }
