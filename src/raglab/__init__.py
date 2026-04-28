@@ -10,7 +10,9 @@ from .core import (
     # Splitters
     split_lines,
     split_by_char,
-    split_by_recursive
+    split_by_recursive,
+    # Embedding
+    Embedder
 )
 
 __all__ = [
@@ -21,6 +23,7 @@ __all__ = [
     "get_metric",
     "split_lines",
     "split_by_char",
-    "split_by_recursive"
+    "split_by_recursive",
+    "Embedder"
 ]
 
