@@ -40,14 +40,14 @@ def render_chunk_lab() -> None:
     state = {"text": "", "chunks": []}
 
     with ui.card().classes("w-full"):
-        ui.label(t("nav.chunk_lab")).classes("text-xl font-bold")
+        ui.label(t("nav.chunk_lab")).classes("text-xl font-bold mb-4")
 
-        # ---- Upload area ----
-        with ui.row().classes("w-full items-start gap-4"):
+        # ---- Input area ----
+        with ui.row().classes("w-full items-start gap-6"):
             # File upload
-            upload_area = ui.column().classes("flex-1")
+            upload_area = ui.column().classes("flex-1 min-w-[300px]")
             with upload_area:
-                ui.label("Upload text file").classes("text-sm font-semibold mb-1")
+                ui.label(t("label.upload_file")).classes("text-sm font-semibold mb-2")
 
                 async def _on_upload(e):
                     """Handle file upload: read content into textarea."""
@@ -55,6 +55,7 @@ def render_chunk_lab() -> None:
                     state["text"] = content
                     text_area.set_value(content)
                     _refresh_preview()
+                    ui.notify("File loaded successfully", type="positive")
 
                 ui.upload(
                     label=".txt",
@@ -62,11 +63,12 @@ def render_chunk_lab() -> None:
                     on_upload=_on_upload,
                 ).props('accept=".txt"').classes("w-full")
 
-            # Textarea for paste
+            # Textarea for manual input
             text_area = ui.textarea(
-                label="Paste / edit text",
+                label=t("label.enter_text"),
                 value="",
-            ).classes("flex-1 min-w-[300px]").props('rows=10').on(
+                placeholder="Paste or type your text content here...",
+            ).classes("flex-2 min-w-[400px]").props('rows=12').on(
                 "update:model-value",
                 lambda e: _on_text_change(e, state, text_area),
             )
@@ -139,12 +141,12 @@ def render_chunk_lab() -> None:
 
             ui.label(f"{len(chunks)} chunks").classes("text-sm text-gray-400 mb-1")
             for i, chunk in enumerate(chunks):
-                bg = "#f0f4ff" if i % 2 == 0 else "#fff8f0"
+                bg = "var(--surface-hover)" if i % 2 == 0 else "var(--surface)"
                 with ui.card().classes(
-                    f"w-full p-2"
-                ).style(f"background-color: {bg}; border-radius: 4px;"):
-                    ui.label(f"#{i + 1}").classes("text-xs text-gray-400 font-mono")
-                    ui.label(chunk).classes("text-sm whitespace-pre-wrap break-words")
+                    f"w-full p-3 border border-[var(--border)]"
+                ).style(f"background-color: {bg}; border-radius: 8px;"):
+                    ui.label(f"#{i + 1}").classes("text-xs text-[var(--text-secondary)] font-mono mb-1")
+                    ui.label(chunk).classes("text-sm whitespace-pre-wrap break-words text-[var(--text-primary)]")
 
     def _export(state):
         """Export chunks as a JSON file download."""

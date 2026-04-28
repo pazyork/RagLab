@@ -69,7 +69,7 @@ def render_evaluate() -> None:
         # 2. Chunk source
         ui.label(t("label.chunks")).classes("text-sm font-semibold mt-2")
         source_toggle = ui.toggle(
-            {"upload": t("label.upload_file"), "case": t("label.select_case")},
+            {"upload": t("label.upload_file"), "input": t("label.manual_input"), "case": t("label.select_case")},
             value="upload",
         ).classes("mb-2")
 
@@ -96,6 +96,36 @@ def render_evaluate() -> None:
                 on_upload=_on_upload,
             ).props('accept=".txt"').classes("w-full")
 
+        # -- Manual input area --
+        input_col = ui.column().classes("w-full")
+        with input_col:
+            text_input = ui.textarea(
+                label=t("label.enter_text"),
+                rows=8,
+                placeholder="Paste or type your text content here...",
+            ).classes("w-full")
+
+            def _on_text_change(e):
+                content = text_input.value.strip()
+                if not content:
+                    state["chunks"] = []
+                    state["case_id"] = None
+                    chunk_status.text = ""
+                    return
+
+                chunks = split_lines(content)
+                state["chunks"] = chunks
+                # Persist as a case so add_run() has a case_id
+                db = _db()
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                case_id = db.add_case(f"input_{ts}", "Manually input via evaluate page")
+                db.add_chunks(case_id, chunks)
+                state["case_id"] = case_id
+                chunk_status.text = f"{len(chunks)} chunks loaded"
+                ui.notify(f"{len(chunks)} chunks loaded", type="positive")
+
+            ui.button(t("btn.load_text"), on_click=_on_text_change).classes("mt-2 w-32")
+
         # -- Case selection --
         case_col = ui.column().classes("w-full")
         with case_col:
@@ -111,6 +141,7 @@ def render_evaluate() -> None:
 
         # Toggle visibility
         upload_col.bind_visibility_from(source_toggle, "value", value="upload")
+        input_col.bind_visibility_from(source_toggle, "value", value="input")
         case_col.bind_visibility_from(source_toggle, "value", value="case")
 
         # Shared chunk status

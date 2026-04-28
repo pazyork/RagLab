@@ -279,7 +279,7 @@ def _render_test_section() -> None:
 
 def _render_defaults_section() -> None:
     with ui.card().classes("w-full"):
-        ui.label("Default Parameters").classes("text-lg font-bold")
+        ui.label(t("label.default_parameters")).classes("text-lg font-bold")
 
         db = _db()
 

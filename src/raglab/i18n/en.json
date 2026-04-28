@@ -46,10 +46,14 @@
   "msg.confirm_delete": "Confirm deletion?",
   "msg.saved": "Saved",
   "label.upload_file": "Upload File",
+  "label.manual_input": "Manual Input",
+  "label.enter_text": "Enter Text Content",
+  "btn.load_text": "Load Text",
   "label.select_case": "Select Case",
   "label.history": "History",
   "label.status": "Status",
   "label.run_at": "Run At",
+  "label.default_parameters": "Default Parameters",
   "msg.no_query": "Please enter a query",
   "msg.no_runs": "No evaluation runs yet"
 }

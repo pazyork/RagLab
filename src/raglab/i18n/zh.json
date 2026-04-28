@@ -46,10 +46,14 @@
   "msg.confirm_delete": "确认删除？",
   "msg.saved": "已保存",
   "label.upload_file": "上传文件",
+  "label.manual_input": "手动输入",
+  "label.enter_text": "输入文本内容",
+  "btn.load_text": "加载文本",
   "label.select_case": "选择用例",
   "label.history": "历史记录",
   "label.status": "状态",
   "label.run_at": "运行时间",
+  "label.default_parameters": "默认参数",
   "msg.no_query": "请输入查询词",
   "msg.no_runs": "暂无评测记录"
 }
