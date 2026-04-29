@@ -76,19 +76,61 @@ class Embedder:
 
         provider_config = self.providers[self.provider]
         model_full_name = f"{self.provider}/{self.model}"
+        base_url = provider_config.get("base_url")
+
+        # 处理 OpenRouter 特殊情况：模型名必须加 openrouter/ 前缀
+        # 这样 Litellm 才会路由到 OpenRouter 而非模型原生 API
+        if base_url and "openrouter.ai" in base_url:
+            if not self.model.startswith("openrouter/"):
+                model_full_name = f"openrouter/{self.model}"
+            else:
+                model_full_name = self.model
 
         try:
             response = litellm.embedding(
                 model=model_full_name,
                 input=text,
                 api_key=provider_config["api_key"],
-                base_url=provider_config["base_url"]
+                base_url=base_url
             )
         except Exception as e:
-            raise RuntimeError(f"Embedding API call failed: {str(e)}") from e
-
-        # Extract embeddings from response
-        embeddings = [item.embedding for item in response.data]
+            # 兼容 Litellm 解析失败的情况（如 OpenRouter 返回结构特殊）
+            if "'dict' object has no attribute 'embedding'" in str(e):
+                import requests
+                if not base_url:
+                    base_url = "https://openrouter.ai/api/v1"
+                base_url = base_url.rstrip("/")
+                try:
+                    # 直接调用原始 API
+                    resp = requests.post(
+                        f"{base_url}/embeddings",
+                        headers={
+                            "Authorization": f"Bearer {provider_config['api_key']}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": self.model,
+                            "input": text
+                        },
+                        timeout=30
+                    )
+                    resp.raise_for_status()
+                    result = resp.json()
+                    embeddings = [item["embedding"] for item in result["data"]]
+                except Exception as raw_e:
+                    raise RuntimeError(f"Raw API call failed: {str(raw_e)}") from raw_e
+            else:
+                raise RuntimeError(f"Embedding API call failed: {str(e)}") from e
+        else:
+            # 正常 Litellm 解析路径
+            try:
+                embeddings = [item.embedding for item in response.data]
+            except (AttributeError, TypeError):
+                # 兼容返回 dict 的情况
+                if isinstance(response, dict) and "data" in response:
+                    embeddings = [item["embedding"] for item in response["data"]]
+                else:
+                    raise RuntimeError(f"Unexpected response format: {type(response)}") from e
 
         # Convert to numpy array
         if isinstance(text, str):

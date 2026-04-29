@@ -1,6 +1,6 @@
 """Settings page: provider management, model management, default params, language toggle."""
 
-from nicegui import ui, app
+from nicegui import ui
 
 from raglab.storage.db import Database
 from raglab.i18n import t, set_lang, get_lang
@@ -86,8 +86,6 @@ def render_settings() -> None:
 def _on_lang_change(e, refresh_area) -> None:
     """Handle language toggle: update i18n, then re-render the whole settings area."""
     set_lang(e.value)
-    # Store in app.storage.user so other pages can pick it up
-    app.storage.user["lang"] = e.value
     refresh_area.clear()
     with refresh_area:
         _render_providers_section()
@@ -128,8 +126,8 @@ def _render_providers_section() -> None:
                     name_input.value = ""
                     key_input.value = ""
                     url_input.value = ""
-                    provider_table.rows = _provider_rows()
-                    provider_table.update()
+                    # NiceGUI 3.x 用update_rows更新表格数据
+                    provider_table.update_rows(_provider_rows())
                     ui.notify(t("msg.saved"), type="positive")
                 except Exception as exc:
                     ui.notify(str(exc), type="negative")
@@ -161,8 +159,8 @@ def _confirm_delete(del_name, dialog, provider_table) -> None:
     _db().remove_provider(name)
     del_name.value = ""
     dialog.close()
-    provider_table.rows = _provider_rows()
-    provider_table.update()
+    # NiceGUI 3.x 用update_rows更新表格数据
+    provider_table.update_rows(_provider_rows())
     ui.notify(t("msg.saved"), type="positive")
 
 
@@ -202,8 +200,8 @@ def _render_models_section() -> None:
                 try:
                     _db().add_model(int(pid_str), model_name)
                     model_input.value = ""
-                    model_table.rows = _model_rows()
-                    model_table.update()
+                    # NiceGUI 3.x 用update_rows更新表格数据
+                    model_table.update_rows(_model_rows())
                     ui.notify(t("msg.saved"), type="positive")
                 except Exception as exc:
                     ui.notify(str(exc), type="negative")

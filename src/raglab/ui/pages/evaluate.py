@@ -101,9 +101,8 @@ def render_evaluate() -> None:
         with input_col:
             text_input = ui.textarea(
                 label=t("label.enter_text"),
-                rows=8,
                 placeholder="Paste or type your text content here...",
-            ).classes("w-full")
+            ).props('rows=8').classes("w-full")
 
             def _on_text_change(e):
                 content = text_input.value.strip()
