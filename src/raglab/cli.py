@@ -524,11 +524,11 @@ def case_remove(
 
 @app.command("serve")
 def serve_cmd(
-    port: int = typer.Option(8080, "--port", help="Port to listen on"),
+    port: int = typer.Option(8099, "--port", help="Port to listen on"),
     log_level: str = typer.Option("INFO", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"),
 ) -> None:
-    """Start the NiceGUI web interface."""
+    """Start the FastAPI + Vue web interface."""
     setup_logging(log_level)
     logger.info(f"Starting RagLab service on port {port}")
-    from raglab.ui.app import run_app
-    run_app(host="0.0.0.0", port=port)
+    import uvicorn
+    uvicorn.run("raglab.api:app", host="0.0.0.0", port=port, log_level=log_level.lower())
