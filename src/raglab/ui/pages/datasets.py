@@ -16,7 +16,7 @@ def render_datasets() -> None:
         "active_source_idx": None,
     }
 
-    with ui.element("div").style("display:flex;height:100%;overflow:hidden;"):
+    with ui.element("div").style("display:flex;height:100%;overflow:hidden;width:100%;"):
         left = ui.element("section").style(
             "width:220px;min-width:200px;max-width:250px;"
             "border-right:1px solid var(--outline-variant);"

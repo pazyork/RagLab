@@ -66,9 +66,10 @@ body {
 
 #rl-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 #rl-header { height: 48px; background: var(--surface-low); border-bottom: 1px solid var(--outline-variant); display: flex; align-items: center; padding: 0 16px; flex-shrink: 0; gap: 16px; }
-#rl-body { display: flex; flex: 1; overflow: hidden; }
+#rl-body { display: flex; flex: 1; overflow: hidden; height: calc(100vh - 48px); }
 #rl-sidebar { width: 64px; background: var(--surface-low); border-right: 1px solid var(--outline-variant); display: flex; flex-direction: column; align-items: center; padding: 16px 0; flex-shrink: 0; }
-#rl-main { flex: 1; overflow: hidden; background: var(--bg); }
+#rl-main { flex: 1; min-width: 0; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+#rl-main > * { flex: 1; min-height: 0; width: 100% !important; box-sizing: border-box; }
 
 .rl-nav-btn { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; color: var(--on-surface-variant); transition: all 0.15s; border: none; background: transparent; }
 .rl-nav-btn:hover { background: var(--surface); color: var(--on-surface); }
@@ -120,7 +121,10 @@ def create_app():
             body = ui.element("div").props('id="rl-body"')
             with body:
                 sidebar = ui.element("nav").props('id="rl-sidebar"')
-                main_area = ui.element("div").props('id="rl-main"')
+                main_area = ui.element("div").props('id="rl-main"').style(
+                    "flex:1;min-width:0;overflow:hidden;background:var(--bg);"
+                    "display:grid;grid-template-columns:1fr;grid-template-rows:1fr;"
+                )
 
         def _navigate(page: str):
             page_state["page"] = page
@@ -139,6 +143,11 @@ def create_app():
                     render_datasets()
                 elif page == "settings":
                     render_settings()
+            ui.timer(0.1, lambda: ui.run_javascript(
+                'var m = document.getElementById("rl-main");'
+                'if(m){Array.from(m.children).forEach(function(c){'
+                'c.style.width="100%";c.style.flex="1";c.style.minHeight="0";});}'
+            ), once=True)
 
         with sidebar:
             _build_sidebar(page_state, _navigate)
@@ -151,6 +160,13 @@ def create_app():
             lang_btn.on_click(lambda: set_lang("en" if get_lang() == "zh" else "zh"))
         with main_area:
             render_playground(page_state)
+
+        # Force main area children to fill width after DOM is ready
+        ui.timer(0.1, lambda: ui.run_javascript(
+            'var m = document.getElementById("rl-main");'
+            'if(m){Array.from(m.children).forEach(function(c){'
+            'c.style.width="100%";c.style.flex="1";c.style.minHeight="0";});}'
+        ), once=True)
 
 
 def _build_sidebar(page_state: dict, navigate_fn):

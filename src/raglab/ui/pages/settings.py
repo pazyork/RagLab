@@ -10,7 +10,7 @@ def _db() -> Database:
 
 def render_settings() -> None:
     """Render Settings page into current NiceGUI context."""
-    with ui.element("div").style("height:100%;overflow-y:auto;padding:32px;"):
+    with ui.element("div").style("height:100%;overflow-y:auto;padding:32px;width:100%;"):
         with ui.element("div").style(
             "max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:32px;"
         ):
@@ -70,21 +70,21 @@ def _build_provider_table() -> None:
         with ui.element("thead"):
             with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
                 for col in ["Name", "Base URL", "API Key", "Actions"]:
-                    el = ui.element("th").style(
+                    with ui.element("th").style(
                         "padding:8px;text-align:left;font-size:11px;font-weight:700;"
                         "text-transform:uppercase;letter-spacing:0.05em;color:var(--on-surface-variant);"
-                    )
-                    el.text = col
+                    ):
+                        ui.html(col)
         with ui.element("tbody"):
             for pid, name, api_key, base_url, _ in providers:
                 masked = (api_key[:4] + "****") if api_key and len(api_key) > 4 else "****"
                 with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
                     for val in [name, base_url or "—", masked]:
-                        el = ui.element("td").style(
+                        with ui.element("td").style(
                             "padding:12px 8px;font-family:'JetBrains Mono',monospace;"
                             "font-size:13px;color:var(--on-surface);"
-                        )
-                        el.text = val
+                        ):
+                            ui.html(val)
                     with ui.element("td").style("padding:12px 8px;text-align:right;"):
                         del_btn = ui.element("button").style(
                             "background:none;border:none;cursor:pointer;color:var(--on-surface-variant);"
@@ -184,21 +184,21 @@ def _build_model_table() -> None:
         with ui.element("thead"):
             with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
                 for col in ["Model Name", "Provider", "Type", "Actions"]:
-                    el = ui.element("th").style(
+                    with ui.element("th").style(
                         "padding:8px;text-align:left;font-size:11px;font-weight:700;"
                         "text-transform:uppercase;letter-spacing:0.05em;color:var(--on-surface-variant);"
-                    )
-                    el.text = col
+                    ):
+                        ui.html(col)
         with ui.element("tbody"):
             for mid, pid, mname, mtype, _ in models:
                 pname = providers.get(pid, str(pid))
                 with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
                     for val in [mname, pname, mtype or "embedding"]:
-                        el = ui.element("td").style(
+                        with ui.element("td").style(
                             "padding:12px 8px;font-family:'JetBrains Mono',monospace;"
                             "font-size:13px;color:var(--on-surface);"
-                        )
-                        el.text = val
+                        ):
+                            ui.html(val)
                     with ui.element("td").style(
                         "padding:12px 8px;display:flex;gap:8px;justify-content:flex-end;"
                     ):
