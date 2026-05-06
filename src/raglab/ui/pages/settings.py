@@ -1,317 +1,337 @@
-"""Settings page: provider management, model management, default params, language toggle."""
+"""Settings page: Provider management, Model management, Default parameters."""
 
 from nicegui import ui
-
 from raglab.storage.db import Database
-from raglab.i18n import t, set_lang, get_lang
-
-
-_DEFAULTS = {
-    "chunk_size": 512,
-    "overlap": 50,
-    "top_k": 10,
-    "metric": "cosine",
-}
 
 
 def _db() -> Database:
-    """Return a Database instance (re-entrant; each call opens its own connection)."""
     return Database()
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _provider_rows() -> list[dict]:
-    """Return provider rows suitable for ui.table."""
-    rows = []
-    for p in _db().list_providers():
-        pid, name, api_key, base_url, _ = p
-        masked = api_key[:4] + "****" if api_key and len(api_key) > 4 else "****"
-        rows.append({"id": pid, "name": name, "api_key": masked, "base_url": base_url or ""})
-    return rows
-
-
-def _provider_columns() -> list[dict]:
-    return [
-        {"name": "id", "label": "ID", "field": "id", "align": "center", "style": "width:50px"},
-        {"name": "name", "label": t("label.name"), "field": "name", "align": "left"},
-        {"name": "api_key", "label": t("label.api_key"), "field": "api_key", "align": "left"},
-        {"name": "base_url", "label": t("label.base_url"), "field": "base_url", "align": "left"},
-    ]
-
-
-def _model_rows() -> list[dict]:
-    rows = []
-    for m in _db().list_models():
-        mid, provider_id, model_name, model_type, _ = m
-        rows.append({"id": mid, "provider_id": provider_id, "model_name": model_name, "model_type": model_type})
-    return rows
-
-
-def _model_columns() -> list[dict]:
-    return [
-        {"name": "id", "label": "ID", "field": "id", "align": "center", "style": "width:50px"},
-        {"name": "provider_id", "label": t("label.provider") + " ID", "field": "provider_id", "align": "center"},
-        {"name": "model_name", "label": t("label.model"), "field": "model_name", "align": "left"},
-        {"name": "model_type", "label": "Type", "field": "model_type", "align": "center"},
-    ]
-
-
-# ---------------------------------------------------------------------------
-# Main render
-# ---------------------------------------------------------------------------
-
 def render_settings() -> None:
-    """Render the Settings page into the current NiceGUI page."""
-
-    # ---- Section: Language Toggle ----
-    with ui.card().classes("w-full"):
-        ui.label(t("label.language")).classes("text-lg font-bold")
-        lang_toggle = ui.toggle({"zh": "中文", "en": "English"},
-                                value=get_lang(),
-                                on_change=lambda e: _on_lang_change(e, refresh_area))
-
-    # Placeholder that we can refresh when language changes
-    refresh_area = ui.column().classes("w-full gap-4")
-
-    with refresh_area:
-        _render_providers_section()
-        _render_models_section()
-        _render_test_section()
-        _render_defaults_section()
-
-
-def _on_lang_change(e, refresh_area) -> None:
-    """Handle language toggle: update i18n, then re-render the whole settings area."""
-    set_lang(e.value)
-    refresh_area.clear()
-    with refresh_area:
-        _render_providers_section()
-        _render_models_section()
-        _render_test_section()
-        _render_defaults_section()
+    """Render Settings page into current NiceGUI context."""
+    with ui.element("div").style("height:100%;overflow-y:auto;padding:32px;"):
+        with ui.element("div").style(
+            "max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:32px;"
+        ):
+            _render_providers_section()
+            _render_models_section()
+            _render_defaults_section()
 
 
 # ---------------------------------------------------------------------------
-# Provider section
+# Provider Management
 # ---------------------------------------------------------------------------
 
 def _render_providers_section() -> None:
-    with ui.card().classes("w-full"):
-        ui.label(t("label.provider")).classes("text-lg font-bold")
+    section = ui.element("div").style(
+        "background:#1E1E1E;border:1px solid #2D2D2D;border-radius:8px;overflow:hidden;"
+    )
+    with section:
+        with ui.element("div").style(
+            "padding:16px 24px;border-bottom:1px solid #2D2D2D;background:#121212;"
+            "display:flex;align-items:center;justify-content:space-between;"
+        ):
+            ui.html('<span style="font-size:18px;font-weight:600;color:var(--on-surface);">Provider Management</span>')
+            add_btn = ui.element("button").classes("rl-btn-secondary").style("width:auto;")
+            with add_btn:
+                ui.html('<span class="material-symbols-outlined" style="font-size:16px;">add</span> Add Provider')
 
-        provider_table = ui.table(
-            columns=_provider_columns(),
-            rows=_provider_rows(),
-            row_key="id",
-        ).classes("w-full")
+        table_area = ui.element("div").style("padding:24px;")
+        add_form_area = ui.element("div").style("padding:0 24px 24px;display:none;")
+        add_form_area.props('data-provider-form=""')
 
-        # --- Add provider form ---
-        with ui.row().classes("w-full items-end gap-2 mt-2"):
-            name_input = ui.input(label=t("label.name")).props("dense").classes("flex-1")
-            key_input = ui.input(label=t("label.api_key"), password=True).props("dense").classes("flex-1")
-            url_input = ui.input(label=t("label.base_url")).props("dense").classes("flex-1")
+        def _refresh_table():
+            table_area.clear()
+            with table_area:
+                _build_provider_table()
 
-            async def _add_provider():
-                name = name_input.value.strip()
-                key = key_input.value.strip()
-                url = url_input.value.strip() or None
-                if not name or not key:
-                    ui.notify("Name and API Key are required", type="warning")
-                    return
-                try:
-                    _db().add_provider(name, key, url)
-                    name_input.value = ""
-                    key_input.value = ""
-                    url_input.value = ""
-                    # NiceGUI 3.x 用update_rows更新表格数据
-                    provider_table.update_rows(_provider_rows())
-                    ui.notify(t("msg.saved"), type="positive")
-                except Exception as exc:
-                    ui.notify(str(exc), type="negative")
+        def _toggle_add_form():
+            ui.run_javascript(
+                'var el = document.querySelector("[data-provider-form]");'
+                'el.style.display = el.style.display === "none" ? "block" : "none";'
+            )
 
-            ui.button(t("btn.add"), on_click=_add_provider).props("dense")
+        add_btn.on("click", _toggle_add_form)
 
-        # --- Delete provider ---
-        with ui.row().classes("w-full items-end gap-2 mt-2"):
-            del_name = ui.input(label=t("label.name")).props("dense").classes("flex-1")
+        with add_form_area:
+            _build_add_provider_form(lambda: _refresh_table())
 
-            dialog = ui.dialog()
-            with dialog:
-                ui.label(t("msg.confirm_delete")).classes("text-body1")
-                with ui.row():
-                    ui.button(t("btn.delete"), on_click=lambda: _confirm_delete(del_name, dialog, provider_table))
-                    ui.button("Cancel", on_click=dialog.close)
-
-            async def _ask_delete():
-                if not del_name.value.strip():
-                    ui.notify("Enter a provider name", type="warning")
-                    return
-                dialog.open()
-
-            ui.button(t("btn.delete"), on_click=_ask_delete).props("dense color=negative")
+        _refresh_table()
 
 
-def _confirm_delete(del_name, dialog, provider_table) -> None:
-    name = del_name.value.strip()
+def _build_provider_table() -> None:
+    providers = _db().list_providers()
+    if not providers:
+        ui.html('<p style="color:var(--on-surface-variant);font-size:13px;">No providers configured.</p>')
+        return
+
+    with ui.element("table").style("width:100%;border-collapse:collapse;"):
+        with ui.element("thead"):
+            with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
+                for col in ["Name", "Base URL", "API Key", "Actions"]:
+                    el = ui.element("th").style(
+                        "padding:8px;text-align:left;font-size:11px;font-weight:700;"
+                        "text-transform:uppercase;letter-spacing:0.05em;color:var(--on-surface-variant);"
+                    )
+                    el.text = col
+        with ui.element("tbody"):
+            for pid, name, api_key, base_url, _ in providers:
+                masked = (api_key[:4] + "****") if api_key and len(api_key) > 4 else "****"
+                with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
+                    for val in [name, base_url or "—", masked]:
+                        el = ui.element("td").style(
+                            "padding:12px 8px;font-family:'JetBrains Mono',monospace;"
+                            "font-size:13px;color:var(--on-surface);"
+                        )
+                        el.text = val
+                    with ui.element("td").style("padding:12px 8px;text-align:right;"):
+                        del_btn = ui.element("button").style(
+                            "background:none;border:none;cursor:pointer;color:var(--on-surface-variant);"
+                        )
+                        with del_btn:
+                            ui.html('<span class="material-symbols-outlined" style="font-size:18px;">delete</span>')
+                        del_btn.on("click", lambda n=name: _delete_provider(n))
+
+
+def _build_add_provider_form(on_save) -> None:
+    with ui.element("div").style(
+        "background:#121212;border:1px solid #2D2D2D;border-radius:8px;padding:16px;"
+        "display:flex;flex-direction:column;gap:12px;"
+    ):
+        ui.html('<span style="font-size:13px;font-weight:700;color:var(--on-surface-variant);">ADD PROVIDER</span>')
+        name_in = ui.input(label="Name").props("outlined dense").classes("w-full")
+        key_in = ui.input(label="API Key", password=True).props("outlined dense").classes("w-full")
+        url_in = ui.input(label="Base URL (optional)").props("outlined dense").classes("w-full")
+
+        def _save():
+            name = name_in.value.strip()
+            key = key_in.value.strip()
+            url = url_in.value.strip() or None
+            if not name or not key:
+                ui.notify("Name and API Key required", type="warning")
+                return
+            try:
+                _db().add_provider(name, key, url)
+                name_in.value = ""
+                key_in.value = ""
+                url_in.value = ""
+                ui.notify("Provider saved", type="positive")
+                on_save()
+            except Exception as e:
+                ui.notify(str(e), type="negative")
+
+        ui.button("Save", on_click=_save).props("dense").style(
+            "background:var(--primary);color:var(--on-primary);border-radius:8px;"
+        )
+
+
+def _delete_provider(name: str) -> None:
     _db().remove_provider(name)
-    del_name.value = ""
-    dialog.close()
-    # NiceGUI 3.x 用update_rows更新表格数据
-    provider_table.update_rows(_provider_rows())
-    ui.notify(t("msg.saved"), type="positive")
+    ui.notify(f"Provider '{name}' deleted", type="positive")
+    ui.navigate.reload()
 
 
 # ---------------------------------------------------------------------------
-# Model section
+# Model Management
 # ---------------------------------------------------------------------------
 
 def _render_models_section() -> None:
-    with ui.card().classes("w-full"):
-        ui.label(t("label.model")).classes("text-lg font-bold")
+    section = ui.element("div").style(
+        "background:#1E1E1E;border:1px solid #2D2D2D;border-radius:8px;overflow:hidden;"
+    )
+    with section:
+        with ui.element("div").style(
+            "padding:16px 24px;border-bottom:1px solid #2D2D2D;background:#121212;"
+            "display:flex;align-items:center;justify-content:space-between;"
+        ):
+            ui.html('<span style="font-size:18px;font-weight:600;color:var(--on-surface);">Model Management</span>')
+            add_btn = ui.element("button").classes("rl-btn-secondary").style("width:auto;")
+            with add_btn:
+                ui.html('<span class="material-symbols-outlined" style="font-size:16px;">add</span> Add Model')
 
-        model_table = ui.table(
-            columns=_model_columns(),
-            rows=_model_rows(),
-            row_key="id",
-        ).classes("w-full")
+        table_area = ui.element("div").style("padding:24px;")
+        add_form_area = ui.element("div").style("padding:0 24px 24px;display:none;")
+        add_form_area.props('data-model-form=""')
 
-        # Add model form
-        with ui.row().classes("w-full items-end gap-2 mt-2"):
-            providers = _db().list_providers()
-            provider_opts = {str(p[0]): p[1] for p in providers}  # id -> name
+        def _refresh():
+            table_area.clear()
+            with table_area:
+                _build_model_table()
 
-            prov_select = ui.select(
-                label=t("label.provider"),
-                options=provider_opts,
-                with_input=True,
-            ).props("dense").classes("flex-1")
+        def _toggle():
+            ui.run_javascript(
+                'var el = document.querySelector("[data-model-form]");'
+                'el.style.display = el.style.display === "none" ? "block" : "none";'
+            )
 
-            model_input = ui.input(label=t("label.model")).props("dense").classes("flex-1")
+        add_btn.on("click", _toggle)
 
-            async def _add_model():
-                pid_str = prov_select.value
-                model_name = model_input.value.strip()
-                if not pid_str or not model_name:
-                    ui.notify("Provider and model name are required", type="warning")
-                    return
-                try:
-                    _db().add_model(int(pid_str), model_name)
-                    model_input.value = ""
-                    # NiceGUI 3.x 用update_rows更新表格数据
-                    model_table.update_rows(_model_rows())
-                    ui.notify(t("msg.saved"), type="positive")
-                except Exception as exc:
-                    ui.notify(str(exc), type="negative")
+        with add_form_area:
+            _build_add_model_form(lambda: _refresh())
 
-            ui.button(t("btn.add"), on_click=_add_model).props("dense")
+        _refresh()
 
 
-# ---------------------------------------------------------------------------
-# Quick Test section
-# ---------------------------------------------------------------------------
+def _build_model_table() -> None:
+    models = _db().list_models()
+    providers = {p[0]: p[1] for p in _db().list_providers()}
+    if not models:
+        ui.html('<p style="color:var(--on-surface-variant);font-size:13px;">No models configured.</p>')
+        return
 
-def _render_test_section() -> None:
-    with ui.card().classes("w-full"):
-        ui.label(t("btn.test") + " " + t("label.model")).classes("text-lg font-bold")
+    with ui.element("table").style("width:100%;border-collapse:collapse;"):
+        with ui.element("thead"):
+            with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
+                for col in ["Model Name", "Provider", "Type", "Actions"]:
+                    el = ui.element("th").style(
+                        "padding:8px;text-align:left;font-size:11px;font-weight:700;"
+                        "text-transform:uppercase;letter-spacing:0.05em;color:var(--on-surface-variant);"
+                    )
+                    el.text = col
+        with ui.element("tbody"):
+            for mid, pid, mname, mtype, _ in models:
+                pname = providers.get(pid, str(pid))
+                with ui.element("tr").style("border-bottom:1px solid #2D2D2D;"):
+                    for val in [mname, pname, mtype or "embedding"]:
+                        el = ui.element("td").style(
+                            "padding:12px 8px;font-family:'JetBrains Mono',monospace;"
+                            "font-size:13px;color:var(--on-surface);"
+                        )
+                        el.text = val
+                    with ui.element("td").style(
+                        "padding:12px 8px;display:flex;gap:8px;justify-content:flex-end;"
+                    ):
+                        test_btn = ui.element("button").style(
+                            "background:none;border:none;cursor:pointer;color:var(--on-surface-variant);"
+                        )
+                        with test_btn:
+                            ui.html('<span class="material-symbols-outlined" style="font-size:18px;">play_arrow</span>')
+                        test_btn.on("click", lambda m=mid: _test_model(m))
 
-        with ui.row().classes("w-full items-end gap-2"):
-            # Build model options from DB
-            models = _db().list_models()
-            providers = {p[0]: p[1] for p in _db().list_providers()}
-            model_opts = {}
-            for m in models:
-                mid, pid, mname, mtype, _ = m
-                prov_name = providers.get(pid, str(pid))
-                model_opts[str(mid)] = f"{prov_name}/{mname}"
+                        del_btn = ui.element("button").style(
+                            "background:none;border:none;cursor:pointer;color:var(--on-surface-variant);"
+                        )
+                        with del_btn:
+                            ui.html('<span class="material-symbols-outlined" style="font-size:18px;">delete</span>')
+                        del_btn.on("click", lambda m=mid: _delete_model(m))
 
-            model_select = ui.select(
-                label=t("label.model"),
-                options=model_opts,
-                with_input=True,
-            ).props("dense").classes("flex-1")
 
-            test_input = ui.input(label=t("label.query")).props("dense").classes("flex-1")
+def _build_add_model_form(on_save) -> None:
+    providers = _db().list_providers()
+    provider_opts = {str(p[0]): p[1] for p in providers}
 
-        result_label = ui.label("").classes("mt-2 text-sm")
+    with ui.element("div").style(
+        "background:#121212;border:1px solid #2D2D2D;border-radius:8px;padding:16px;"
+        "display:flex;flex-direction:column;gap:12px;"
+    ):
+        ui.html('<span style="font-size:13px;font-weight:700;color:var(--on-surface-variant);">ADD MODEL</span>')
+        prov_sel = ui.select(
+            label="Provider", options=provider_opts, with_input=True
+        ).props("outlined dense").classes("w-full")
+        model_in = ui.input(label="Model Name").props("outlined dense").classes("w-full")
 
-        async def _run_test():
-            mid_str = model_select.value
-            text = test_input.value.strip()
-            if not mid_str or not text:
-                ui.notify(t("msg.no_model"), type="warning")
+        def _save():
+            pid_str = prov_sel.value
+            mname = model_in.value.strip()
+            if not pid_str or not mname:
+                ui.notify("Provider and model name required", type="warning")
                 return
+            try:
+                _db().add_model(int(pid_str), mname)
+                model_in.value = ""
+                ui.notify("Model saved", type="positive")
+                on_save()
+            except Exception as e:
+                ui.notify(str(e), type="negative")
+
+        ui.button("Save", on_click=_save).props("dense").style(
+            "background:var(--primary);color:var(--on-primary);border-radius:8px;"
+        )
+
+
+def _test_model(model_id: int) -> None:
+    models = _db().list_models()
+    providers = {p[0]: p for p in _db().list_providers()}
+    for mid, pid, mname, _, _ in models:
+        if mid == model_id:
+            p = providers.get(pid)
+            if not p:
+                ui.notify("Provider not found", type="negative")
+                return
+            _, pname, api_key, base_url, _ = p
             try:
                 from raglab.core.embedder import Embedder
                 emb = Embedder()
-                # Look up provider info for this model
-                models_list = _db().list_models()
-                providers_list = _db().list_providers()
-                prov_map = {p[0]: p for p in providers_list}
-                for m in models_list:
-                    if str(m[0]) == mid_str:
-                        pid = m[1]
-                        mname = m[2]
-                        p = prov_map.get(pid)
-                        if p:
-                            _, pname, api_key, base_url, _ = p
-                            emb.configure(pname, api_key, mname, base_url)
-                        break
-                vec = emb.embed(text)
-                dim = len(vec)
-                preview = ", ".join(f"{v:.4f}" for v in vec[:5])
-                result_label.text = f"dim={dim}  [{preview}, ...]"
-                ui.notify(t("msg.complete"), type="positive")
-            except Exception as exc:
-                result_label.text = f"{t('msg.error_api')}: {exc}"
-                ui.notify(t("msg.error_api"), type="negative")
+                emb.configure(pname, api_key, mname, base_url)
+                vec = emb.embed("test embedding")
+                ui.notify(
+                    f"OK — dim={len(vec)}, first=[{vec[0]:.4f}, {vec[1]:.4f}, ...]",
+                    type="positive"
+                )
+            except Exception as e:
+                ui.notify(f"Error: {e}", type="negative")
+            return
 
-        ui.button(t("btn.test"), on_click=_run_test).props("dense").classes("mt-2")
+
+def _delete_model(model_id: int) -> None:
+    db = _db()
+    cursor = db.conn.cursor()
+    cursor.execute("DELETE FROM models WHERE id = ?", (model_id,))
+    db.conn.commit()
+    ui.notify("Model deleted", type="positive")
+    ui.navigate.reload()
 
 
 # ---------------------------------------------------------------------------
-# Default Params section
+# Default Parameters
 # ---------------------------------------------------------------------------
 
 def _render_defaults_section() -> None:
-    with ui.card().classes("w-full"):
-        ui.label(t("label.default_parameters")).classes("text-lg font-bold")
+    section = ui.element("div").style(
+        "background:#1E1E1E;border:1px solid #2D2D2D;border-radius:8px;overflow:hidden;"
+    )
+    with section:
+        with ui.element("div").style(
+            "padding:16px 24px;border-bottom:1px solid #2D2D2D;background:#121212;"
+        ):
+            ui.html('<span style="font-size:18px;font-weight:600;color:var(--on-surface);">Default Parameters</span>')
 
-        db = _db()
-
-        with ui.row().classes("w-full items-end gap-4"):
+        with ui.element("div").style(
+            "padding:24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;"
+        ):
+            db = _db()
             chunk_size = ui.number(
-                label=t("label.chunk_size"),
-                value=db.get_config("chunk_size") or _DEFAULTS["chunk_size"],
+                label="Chunk Size",
+                value=db.get_config("chunk_size") or 512,
                 min=1,
-            ).props("dense")
-
+            ).props("outlined dense")
             overlap = ui.number(
-                label=t("label.overlap"),
-                value=db.get_config("overlap") or _DEFAULTS["overlap"],
+                label="Overlap",
+                value=db.get_config("overlap") or 50,
                 min=0,
-            ).props("dense")
-
+            ).props("outlined dense")
             top_k = ui.number(
-                label=t("label.top_k"),
-                value=db.get_config("top_k") or _DEFAULTS["top_k"],
+                label="Top-K",
+                value=db.get_config("top_k") or 10,
                 min=1,
-            ).props("dense")
-
+            ).props("outlined dense")
             metric = ui.select(
-                label=t("label.metric"),
+                label="Default Metric",
                 options=["cosine", "euclidean", "dot", "manhattan"],
-                value=db.get_config("metric") or _DEFAULTS["metric"],
-            ).props("dense")
+                value=db.get_config("metric") or "cosine",
+            ).props("outlined dense")
 
-        async def _save_defaults():
-            d = _db()
-            d.set_config("chunk_size", int(chunk_size.value))
-            d.set_config("overlap", int(overlap.value))
-            d.set_config("top_k", int(top_k.value))
-            d.set_config("metric", metric.value)
-            ui.notify(t("msg.saved"), type="positive")
+        with ui.element("div").style("padding:0 24px 24px;display:flex;justify-content:flex-end;"):
+            def _save():
+                d = _db()
+                d.set_config("chunk_size", int(chunk_size.value))
+                d.set_config("overlap", int(overlap.value))
+                d.set_config("top_k", int(top_k.value))
+                d.set_config("metric", metric.value)
+                ui.notify("Saved", type="positive")
 
-        ui.button(t("btn.save"), on_click=_save_defaults).props("dense").classes("mt-2")
+            ui.button("Save Changes", on_click=_save).style(
+                "background:var(--primary-container);color:#000;border-radius:8px;"
+                "padding:8px 32px;font-weight:600;border:none;cursor:pointer;"
+            )
