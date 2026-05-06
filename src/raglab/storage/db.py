@@ -194,6 +194,15 @@ class Database:
         cursor.execute("DELETE FROM test_cases WHERE id = ?", (case_id,))
         self.conn.commit()
 
+    def delete_case(self, case_id: int):
+        """Delete a test case and cascade-delete its chunks and eval runs/scores."""
+        cursor = self.conn.cursor()
+        # eval_scores cascade from eval_runs via FK ON DELETE CASCADE
+        cursor.execute("DELETE FROM eval_runs WHERE case_id = ?", (case_id,))
+        # case_chunks cascade from test_cases via FK ON DELETE CASCADE
+        cursor.execute("DELETE FROM test_cases WHERE id = ?", (case_id,))
+        self.conn.commit()
+
     # Chunks methods
     def add_chunks(self, case_id: int, chunks: List[str]):
         """Add multiple chunks for a test case."""
