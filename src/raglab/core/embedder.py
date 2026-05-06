@@ -1,8 +1,11 @@
 """Unified embedding interface supporting multiple providers via litellm."""
 
+import logging
 import numpy as np
 import litellm
 from typing import Optional, Union, List
+
+logger = logging.getLogger(__name__)
 
 
 class Embedder:
@@ -85,6 +88,7 @@ class Embedder:
                 model_full_name = f"openrouter/{self.model}"
             else:
                 model_full_name = self.model
+            logger.debug(f"OpenRouter mode: model_full_name={model_full_name}")
 
         try:
             response = litellm.embedding(
@@ -96,6 +100,7 @@ class Embedder:
         except Exception as e:
             # 兼容 Litellm 解析失败的情况（如 OpenRouter 返回结构特殊）
             if "'dict' object has no attribute 'embedding'" in str(e):
+                logger.warning(f"Litellm parse failed, falling back to raw API: {e}")
                 import requests
                 if not base_url:
                     base_url = "https://openrouter.ai/api/v1"
@@ -117,9 +122,12 @@ class Embedder:
                     resp.raise_for_status()
                     result = resp.json()
                     embeddings = [item["embedding"] for item in result["data"]]
+                    logger.info(f"Raw API call succeeded, got {len(embeddings)} embeddings")
                 except Exception as raw_e:
+                    logger.error(f"Raw API call failed: {raw_e}")
                     raise RuntimeError(f"Raw API call failed: {str(raw_e)}") from raw_e
             else:
+                logger.error(f"Embedding API call failed: {e}")
                 raise RuntimeError(f"Embedding API call failed: {str(e)}") from e
         else:
             # 正常 Litellm 解析路径
@@ -129,8 +137,10 @@ class Embedder:
                 # 兼容返回 dict 的情况
                 if isinstance(response, dict) and "data" in response:
                     embeddings = [item["embedding"] for item in response["data"]]
+                    logger.info(f"Parsed response as dict format, got {len(embeddings)} embeddings")
                 else:
-                    raise RuntimeError(f"Unexpected response format: {type(response)}") from e
+                    logger.error(f"Unexpected response format: {type(response)}")
+                    raise RuntimeError(f"Unexpected response format: {type(response)}")
 
         # Convert to numpy array
         if isinstance(text, str):

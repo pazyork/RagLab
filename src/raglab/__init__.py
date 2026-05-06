@@ -14,6 +14,7 @@ from .core import (
     # Embedding
     Embedder
 )
+from .logging_config import setup_logging, get_logger
 
 __all__ = [
     "cosine_similarity",
@@ -24,6 +25,8 @@ __all__ = [
     "split_lines",
     "split_by_char",
     "split_by_recursive",
-    "Embedder"
+    "Embedder",
+    "setup_logging",
+    "get_logger"
 ]
 

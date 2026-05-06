@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -13,6 +14,9 @@ from raglab.core.metrics import get_metric
 from raglab.core.scorer import dense_score, sparse_score
 from raglab.core.splitter import split_by_char, split_by_recursive
 from raglab.storage.db import Database
+from raglab.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Lazy singletons
@@ -81,7 +85,7 @@ def _output_results(results: List[Dict], fmt: str = "table") -> str:
 # Main app & sub-apps
 # ---------------------------------------------------------------------------
 
-app = typer.Typer(name="raglab", help="Embedding model evaluation and selection tool.")
+app = typer.Typer(name="raglab", help="Embedding model evaluation and selection tool.", callback=lambda: setup_logging("INFO"))
 
 provider_app = typer.Typer(help="Manage embedding providers.")
 model_app = typer.Typer(help="List and test models.")
@@ -521,7 +525,10 @@ def case_remove(
 @app.command("serve")
 def serve_cmd(
     port: int = typer.Option(8080, "--port", help="Port to listen on"),
+    log_level: str = typer.Option("INFO", "--log-level", help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"),
 ) -> None:
     """Start the NiceGUI web interface."""
+    setup_logging(log_level)
+    logger.info(f"Starting RagLab service on port {port}")
     from raglab.ui.app import run_app
     run_app(host="0.0.0.0", port=port)

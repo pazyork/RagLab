@@ -4,6 +4,7 @@ This module provides functions for scoring text chunks against queries using
 both dense embedding-based methods and sparse statistical methods (BM25, TF-IDF).
 """
 
+import logging
 import math
 import re
 from typing import List, Dict, Callable
@@ -11,6 +12,8 @@ import numpy as np
 
 from .metrics import get_metric
 from .embedder import Embedder
+
+logger = logging.getLogger(__name__)
 
 
 def _tokenize(text: str) -> List[str]:
@@ -67,6 +70,8 @@ def dense_score(
     Returns:
         List of dictionaries with keys "index", "score", "text", sorted by score descending
     """
+    logger.info(f"Dense scoring: query='{query[:50]}...', chunks={len(chunks)}, metric={metric}, top_k={top_k}")
+
     if not chunks:
         return []
 
@@ -74,8 +79,13 @@ def dense_score(
     metric_fn = get_metric(metric)
 
     # Embed query and chunks
+    logger.debug("Embedding query...")
     query_embedding = embedder.embed(query)
+    logger.debug(f"Query embedding shape: {query_embedding.shape}")
+
+    logger.debug(f"Embedding {len(chunks)} chunks...")
     chunk_embeddings = embedder.embed_batch(chunks)
+    logger.debug(f"Chunk embeddings shape: {chunk_embeddings.shape}")
 
     # Calculate scores for all chunks
     results = []
@@ -89,6 +99,7 @@ def dense_score(
 
     # Sort by score descending and take top_k
     results.sort(key=lambda x: x["score"], reverse=True)
+    logger.info(f"Dense scoring completed, returning top {top_k} results")
     return results[:top_k]
 
 
@@ -252,11 +263,14 @@ def sparse_score(
     Raises:
         ValueError: If the algorithm is not recognized
     """
+    logger.info(f"Sparse scoring: query='{query[:50]}...', chunks={len(chunks)}, algorithm={algorithm}, top_k={top_k}")
+
     if algorithm == "bm25":
         return bm25_score(query, chunks, top_k)
     elif algorithm == "tfidf":
         return tfidf_score(query, chunks, top_k)
     else:
+        logger.error(f"Unknown algorithm: {algorithm}")
         raise ValueError(
             f"Unknown algorithm: {algorithm}. Valid algorithms: ['bm25', 'tfidf']"
         )
