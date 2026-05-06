@@ -10,6 +10,14 @@ from typing import Optional
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+# Configure CJK font support — try common macOS/Linux CJK fonts in order
+import matplotlib.font_manager as _fm
+_CJK_FONTS = ["STHeiti", "PingFang SC", "Heiti SC", "Arial Unicode MS", "Noto Sans CJK SC", "WenQuanYi Micro Hei"]
+for _font in _CJK_FONTS:
+    if any(f.name == _font for f in _fm.fontManager.ttflist):
+        plt.rcParams["font.family"] = _font
+        break
+plt.rcParams["axes.unicode_minus"] = False
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -312,25 +320,25 @@ async def playground_query(body: QueryRequest):
         all_embeddings = await asyncio.to_thread(emb.embed_batch, chunks)
         query_emb = await asyncio.to_thread(emb.embed, body.query)
 
-        dist_chart = _make_distribution_chart([r["score"] for r in results])
-        tsne_chart = None
+        scores = [r["score"] for r in results]
+        tsne_points = None
         if len(all_embeddings) >= 3:
-            tsne_chart = await asyncio.to_thread(
-                _make_tsne_chart, np.array(all_embeddings), np.array(query_emb)
+            tsne_points = await asyncio.to_thread(
+                _compute_tsne_points, np.array(all_embeddings), np.array(query_emb), chunks
             )
     else:
         results = await asyncio.to_thread(sparse_score, body.query, chunks, "bm25", body.top_k)
         results = [r for r in results if r["score"] >= body.threshold]
-        dist_chart = _make_distribution_chart([r["score"] for r in results]) if results else None
-        tsne_chart = None
+        scores = [r["score"] for r in results]
+        tsne_points = None
 
     elapsed_ms = int((time.time() - t0) * 1000)
     return {
         "results": results,
         "elapsed_ms": elapsed_ms,
         "total": len(results),
-        "dist_chart": dist_chart,
-        "tsne_chart": tsne_chart,
+        "scores": scores,
+        "tsne_points": tsne_points,
     }
 
 
@@ -367,6 +375,7 @@ async def chunk_vs_chunk(body: ChunkVsChunkRequest):
         ]
     else:
         from raglab.core.scorer import bm25_score
+        embeddings = []  # no embeddings for BM25
         n = len(chunks)
         matrix = [[0.0] * n for _ in range(n)]
         for i in range(n):
@@ -374,9 +383,22 @@ async def chunk_vs_chunk(body: ChunkVsChunkRequest):
             for r in results:
                 matrix[i][r["index"]] = float(r["score"])
 
-    labels = [c[:20] + "..." if len(c) > 20 else c for c in chunks]
-    heatmap = _make_heatmap(matrix, labels)
-    return {"matrix": matrix, "labels": labels, "heatmap": heatmap}
+    labels = [c[:30] + "…" if len(c) > 30 else c for c in chunks]
+    n = len(chunks)
+    off_diag = [matrix[i][j] for i in range(n) for j in range(n) if i != j]
+    avg_sim = float(sum(off_diag) / len(off_diag)) if off_diag else 0.0
+    cohesion = float(sum(1 for s in off_diag if s >= 0.5) / len(off_diag) * 100) if off_diag else 0.0
+    tsne_points = None
+    if body.strategy == "dense" and len(chunks) >= 3:
+        tsne_points = await asyncio.to_thread(
+            _compute_cvc_tsne_points, np.array(embeddings), chunks
+        )
+    return {
+        "matrix": matrix, "labels": labels, "chunks": chunks,
+        "off_diag_scores": off_diag,
+        "avg_sim": round(avg_sim, 4), "cohesion": round(cohesion, 1),
+        "tsne_points": tsne_points,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +429,25 @@ def _make_distribution_chart(scores: list) -> Optional[str]:
     return _fig_to_b64(fig)
 
 
-def _make_tsne_chart(embeddings: np.ndarray, query_emb: np.ndarray) -> Optional[str]:
+def _compute_cvc_tsne_points(embeddings: np.ndarray, chunks: list) -> Optional[list]:
+    """t-SNE for chunk-vs-chunk view (no query point)."""
+    try:
+        from sklearn.manifold import TSNE
+        n = len(embeddings)
+        perplexity = min(30, max(2, n - 1))
+        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=300)
+        coords = tsne.fit_transform(embeddings)
+        return [
+            {"x": float(x), "y": float(y), "index": i,
+             "text": chunks[i] if i < len(chunks) else f"Chunk {i}", "type": "chunk"}
+            for i, (x, y) in enumerate(coords)
+        ]
+    except Exception:
+        return None
+
+
+def _compute_tsne_points(embeddings: np.ndarray, query_emb: np.ndarray, chunks: list) -> Optional[list]:
+    """Return t-SNE coordinates as JSON-serializable list for interactive frontend rendering."""
     try:
         from sklearn.manifold import TSNE
         n = len(embeddings)
@@ -415,35 +455,36 @@ def _make_tsne_chart(embeddings: np.ndarray, query_emb: np.ndarray) -> Optional[
         all_vecs = np.vstack([embeddings, query_emb.reshape(1, -1)])
         tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=300)
         coords = tsne.fit_transform(all_vecs)
-        chunk_coords = coords[:-1]
-        query_coord = coords[-1]
-
-        fig, ax = plt.subplots(figsize=(4, 3.5))
-        fig.patch.set_facecolor("#121212")
-        ax.set_facecolor("#050505")
-        ax.scatter(chunk_coords[:, 0], chunk_coords[:, 1], c="#bdc8d1", s=20, alpha=0.6)
-        ax.scatter([query_coord[0]], [query_coord[1]], c="#8ed5ff", s=80, zorder=5, marker="*")
-        ax.tick_params(colors="#bdc8d1", labelsize=7)
-        ax.spines[:].set_color("#2D2D2D")
-        plt.tight_layout(pad=0.5)
-        return _fig_to_b64(fig)
+        points = []
+        for i, (x, y) in enumerate(coords[:-1]):
+            points.append({
+                "x": float(x), "y": float(y),
+                "index": i,
+                "text": chunks[i] if i < len(chunks) else f"Chunk {i}",
+                "type": "chunk"
+            })
+        qx, qy = coords[-1]
+        points.append({"x": float(qx), "y": float(qy), "index": -1, "text": "Query", "type": "query"})
+        return points
     except Exception:
         return None
 
 
 def _make_heatmap(matrix: list, labels: list) -> str:
     n = len(labels)
-    fig, ax = plt.subplots(figsize=(max(5, n * 0.45), max(4, n * 0.4)))
+    # Truncate labels for display
+    display_labels = [f"#{i+1} {lb[:12]}{'…' if len(lb) > 12 else ''}" for i, lb in enumerate(labels)]
+    fig, ax = plt.subplots(figsize=(max(5, n * 0.55), max(4, n * 0.5)))
     fig.patch.set_facecolor("#121212")
     ax.set_facecolor("#050505")
     im = ax.imshow(matrix, cmap="YlOrRd", vmin=0, vmax=1)
     plt.colorbar(im, ax=ax).ax.tick_params(colors="#bdc8d1", labelsize=7)
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7, color="#bdc8d1")
-    ax.set_yticklabels(labels, fontsize=7, color="#bdc8d1")
+    ax.set_xticklabels(display_labels, rotation=30, ha="right", fontsize=7, color="#bdc8d1")
+    ax.set_yticklabels(display_labels, fontsize=7, color="#bdc8d1")
     ax.spines[:].set_color("#2D2D2D")
-    if n <= 10:
+    if n <= 15:
         for i in range(n):
             for j in range(n):
                 ax.text(j, i, f"{matrix[i][j]:.2f}", ha="center", va="center",

@@ -1,5 +1,136 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import EChart from '../components/EChart.vue'
+
+// ── ECharts theme helpers ─────────────────────────────────────────────────────
+const C = { primary: '#38bdf8', grid: '#2D2D2D', text: '#bdc8d1', bg: '#131313', surface: '#1c1b1b' }
+
+function makeHistOption(scores, title = '') {
+  if (!scores?.length) return null
+  const min = Math.min(...scores), max = Math.max(...scores)
+  const bins = 10
+  const step = (max - min) / bins || 0.1
+  const counts = Array(bins).fill(0)
+  scores.forEach(s => {
+    const i = Math.min(Math.floor((s - min) / step), bins - 1)
+    counts[i]++
+  })
+  const xData = counts.map((_, i) => (min + i * step + step / 2).toFixed(2))
+  return {
+    backgroundColor: C.bg,
+    tooltip: { trigger: 'axis', formatter: p => `Score: ${p[0].name}<br/>Count: ${p[0].value}` },
+    grid: { left: 40, right: 16, top: 16, bottom: 36 },
+    xAxis: { type: 'category', data: xData, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { show: false } },
+    yAxis: { type: 'value', axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { lineStyle: { color: C.grid } } },
+    series: [{ type: 'bar', data: counts, itemStyle: { color: C.primary, borderRadius: [2, 2, 0, 0] }, barMaxWidth: 32 }],
+  }
+}
+
+function makeHeatmapOption(matrix, labels) {
+  if (!matrix?.length) return null
+  const n = matrix.length
+  const data = []
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      data.push([j, i, +matrix[i][j].toFixed(3)])
+  const shortLabels = labels.map((l, i) => `#${i+1} ${l.slice(0, 18)}${l.length > 18 ? '…' : ''}`)
+  return {
+    backgroundColor: C.bg,
+    tooltip: {
+      position: 'top',
+      formatter: p => `${shortLabels[p.data[1]]} × ${shortLabels[p.data[0]]}<br/>Similarity: <b>${p.data[2]}</b>`
+    },
+    grid: { left: 160, right: 80, top: 16, bottom: 120 },
+    xAxis: { type: 'category', data: shortLabels, axisLabel: { color: C.text, fontSize: 10, rotate: 30, interval: 0 }, axisLine: { lineStyle: { color: C.grid } }, splitArea: { show: true, areaStyle: { color: [C.bg, C.surface] } } },
+    yAxis: { type: 'category', data: shortLabels, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } }, splitArea: { show: true, areaStyle: { color: [C.bg, C.surface] } } },
+    visualMap: { min: 0, max: 1, calculable: true, orient: 'vertical', right: 8, top: 'center', textStyle: { color: C.text, fontSize: 10 }, inRange: { color: ['#ffffcc', '#fd8d3c', '#800026'] } },
+    series: [{
+      type: 'heatmap', data,
+      label: { show: n <= 12, formatter: p => p.data[2].toFixed(2), fontSize: 9, color: '#fff' },
+      emphasis: { itemStyle: { shadowBlur: 6, shadowColor: 'rgba(0,0,0,0.5)' } }
+    }],
+  }
+}
+
+function makeScatterOption(points) {
+  if (!points?.length) return null
+  const chunks = points.filter(p => p.type === 'chunk')
+  const query = points.filter(p => p.type === 'query')
+  return {
+    backgroundColor: C.bg,
+    labelLayout: { hideOverlap: true },
+    tooltip: {
+      trigger: 'item',
+      formatter: p => {
+        const d = p.data
+        const label = d[3] === 'query' ? 'Query' : `#${d[2] + 1}`
+        const text = d[4]?.length > 60 ? d[4].slice(0, 60) + '…' : d[4]
+        return `<b style="color:${C.primary}">${label}</b><br/><span style="color:${C.text}">${text}</span>`
+      }
+    },
+    grid: { left: 24, right: 24, top: 16, bottom: 24 },
+    xAxis: { type: 'value', axisLabel: { show: false }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { lineStyle: { color: C.grid, opacity: 0.3 } } },
+    yAxis: { type: 'value', axisLabel: { show: false }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { lineStyle: { color: C.grid, opacity: 0.3 } } },
+    series: [
+      {
+        name: 'Chunks', type: 'scatter',
+        data: chunks.map(p => [p.x, p.y, p.index, p.type, p.text]),
+        symbolSize: 10,
+        itemStyle: { color: C.primary },
+        label: {
+          show: true,
+          formatter: p => {
+            const idx = p.data[2] + 1
+            const txt = (p.data[4] || '').slice(0, 16)
+            return `#${idx} ${txt}${p.data[4]?.length > 16 ? '…' : ''}`
+          },
+          position: 'top', fontSize: 9, color: C.text,
+        },
+      },
+      ...(query.length ? [{
+        name: 'Query', type: 'scatter',
+        data: query.map(p => [p.x, p.y, p.index, p.type, p.text]),
+        symbol: 'diamond', symbolSize: 14,
+        itemStyle: { color: '#f59e0b' },
+        label: { show: true, formatter: 'Query', position: 'top', fontSize: 9, color: '#f59e0b' },
+      }] : []),
+    ],
+  }
+}
+
+function makeCvcScatterOption(points) {
+  if (!points?.length) return null
+  return {
+    backgroundColor: C.bg,
+    labelLayout: { hideOverlap: true },
+    tooltip: {
+      trigger: 'item',
+      formatter: p => {
+        const d = p.data
+        const text = d[3]?.length > 60 ? d[3].slice(0, 60) + '…' : d[3]
+        return `<b style="color:${C.primary}">#${d[2] + 1}</b><br/><span style="color:${C.text}">${text}</span>`
+      }
+    },
+    grid: { left: 24, right: 24, top: 16, bottom: 24 },
+    xAxis: { type: 'value', axisLabel: { show: false }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { lineStyle: { color: C.grid, opacity: 0.3 } } },
+    yAxis: { type: 'value', axisLabel: { show: false }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { lineStyle: { color: C.grid, opacity: 0.3 } } },
+    series: [{
+      type: 'scatter',
+      data: points.map(p => [p.x, p.y, p.index, p.text]),
+      symbolSize: 10,
+      itemStyle: { color: C.primary },
+      label: {
+        show: true,
+        formatter: p => {
+          const idx = p.data[2] + 1
+          const txt = (p.data[3] || '').slice(0, 16)
+          return `#${idx} ${txt}${p.data[3]?.length > 16 ? '…' : ''}`
+        },
+        position: 'top', fontSize: 9, color: C.text,
+      },
+    }],
+  }
+}
 
 const props = defineProps({
   view: {
@@ -43,7 +174,9 @@ const adhocText = ref('')
 const datasets = ref([])
 const selectedDataset = ref('')
 const results = ref([])
-const stats = ref(null)   // { time_ms, count, similarity_dist_b64, tsne_b64 }
+const stats = ref(null)   // { time_ms, count }
+const distOption = ref(null)
+const tsneOption = ref(null)
 
 const adhocChunks = computed(() => {
   if (!adhocText.value.trim()) return []
@@ -92,12 +225,9 @@ async function runQuery() {
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     results.value = data.results ?? []
-    stats.value = {
-      time_ms: data.elapsed_ms ?? null,
-      count: data.total ?? 0,
-      similarity_dist_b64: data.dist_chart ? data.dist_chart.replace(/^data:image\/png;base64,/, '') : null,
-      tsne_b64: data.tsne_chart ? data.tsne_chart.replace(/^data:image\/png;base64,/, '') : null,
-    }
+    stats.value = { time_ms: data.elapsed_ms ?? null, count: data.total ?? 0 }
+    distOption.value = makeHistOption(data.scores ?? [], 'Similarity Distribution')
+    tsneOption.value = makeScatterOption(data.tsne_points ?? null)
   } catch (e) {
     showToast('Query failed: ' + e.message)
   } finally {
@@ -115,7 +245,11 @@ const cvcAdhocText = ref('')
 const cvcDataset = ref('')
 const cvcMaxN = ref(30)
 const cvcLoading = ref(false)
-const heatmapB64 = ref('')
+const cvcAvgSim = ref(null)
+const cvcCohesion = ref(null)
+const heatmapOption = ref(null)
+const cvcDistOption = ref(null)
+const cvcTsneOption = ref(null)
 
 const cvcChunks = computed(() => {
   if (!cvcAdhocText.value.trim()) return []
@@ -128,7 +262,11 @@ watch(() => cvcTab.value, (tab) => {
 
 async function runCvc() {
   cvcLoading.value = true
-  heatmapB64.value = ''
+  cvcAvgSim.value = null
+  cvcCohesion.value = null
+  heatmapOption.value = null
+  cvcDistOption.value = null
+  cvcTsneOption.value = null
   try {
     const body = {
       chunks: cvcTab.value === 'adhoc' ? cvcChunks.value : [],
@@ -144,13 +282,19 @@ async function runCvc() {
     })
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
-    heatmapB64.value = data.heatmap_b64 ?? ''
+    cvcAvgSim.value = data.avg_sim ?? null
+    cvcCohesion.value = data.cohesion ?? null
+    heatmapOption.value = makeHeatmapOption(data.matrix ?? null, data.labels ?? [])
+    cvcDistOption.value = makeHistOption(data.off_diag_scores ?? [], 'Similarity Distribution')
+    cvcTsneOption.value = makeCvcScatterOption(data.tsne_points ?? null)
   } catch (e) {
     showToast('Analysis failed: ' + e.message)
   } finally {
     cvcLoading.value = false
   }
 }
+
+// All charts now use ECharts via EChart.vue component
 </script>
 
 <template>
@@ -292,7 +436,7 @@ async function runCvc() {
             :class="{ top: i === 0 }"
           >
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-              <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--on-surface-variant);">#{{ i + 1 }}</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--on-surface-variant);">#{{ r.index + 1 }}</span>
               <span class="rl-score-badge" :class="scoreClass(r.score)">{{ r.score.toFixed(4) }}</span>
             </div>
             <p style="margin:0;font-size:12px;color:var(--on-surface-variant);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">
@@ -331,28 +475,18 @@ async function runCvc() {
 
       <!-- Similarity Distribution -->
       <div>
-        <div class="rl-label" style="margin-bottom:8px;">Similarity Distribution</div>
+        <div class="rl-label" style="margin-bottom:8px;">SIMILARITY DISTRIBUTION</div>
         <div style="background:var(--surface-input);border-radius:4px;overflow:hidden;min-height:120px;display:flex;align-items:center;justify-content:center;">
-          <img
-            v-if="stats && stats.similarity_dist_b64"
-            :src="'data:image/png;base64,' + stats.similarity_dist_b64"
-            style="width:100%;display:block;"
-            alt="Similarity distribution chart"
-          />
+          <EChart v-if="distOption" :option="distOption" height="140px" title="Similarity Distribution" style="width:100%;" />
           <span v-else style="color:var(--on-surface-variant);font-size:12px;">No data yet</span>
         </div>
       </div>
 
       <!-- t-SNE Projection -->
       <div>
-        <div class="rl-label" style="margin-bottom:8px;">t-SNE Projection</div>
-        <div style="background:var(--surface-input);border-radius:4px;overflow:hidden;min-height:120px;display:flex;align-items:center;justify-content:center;">
-          <img
-            v-if="stats && stats.tsne_b64"
-            :src="'data:image/png;base64,' + stats.tsne_b64"
-            style="width:100%;display:block;"
-            alt="t-SNE projection chart"
-          />
+        <div class="rl-label" style="margin-bottom:8px;">T-SNE PROJECTION</div>
+        <div style="background:var(--surface-input);border-radius:4px;overflow:hidden;min-height:160px;display:flex;align-items:center;justify-content:center;">
+          <EChart v-if="tsneOption" :option="tsneOption" height="200px" title="t-SNE Projection" style="width:100%;" />
           <span v-else style="color:var(--on-surface-variant);font-size:12px;">No data yet</span>
         </div>
       </div>
@@ -410,46 +544,83 @@ async function runCvc() {
       </button>
     </div>
 
-    <!-- CENTER: Chunks input -->
-    <div class="rl-card" style="display:flex;flex-direction:column;overflow:hidden;min-height:0;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:8px;flex-shrink:0;">Chunks</div>
+    <!-- CENTER: Chunks input + Similarity Matrix -->
+    <div style="display:flex;flex-direction:column;gap:16px;overflow:hidden;min-height:0;">
 
-      <div class="rl-tab-bar" style="flex-shrink:0;">
-        <button class="rl-tab-btn" :class="{ active: cvcTab === 'adhoc' }" @click="cvcTab = 'adhoc'">Ad-hoc</button>
-        <button class="rl-tab-btn" :class="{ active: cvcTab === 'dataset' }" @click="cvcTab = 'dataset'">Dataset</button>
-      </div>
+      <!-- Chunks input card -->
+      <div class="rl-card" style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px;flex-shrink:0;">Chunks</div>
 
-      <div v-if="cvcTab === 'adhoc'" style="flex:1;display:flex;flex-direction:column;min-height:0;">
-        <textarea
-          class="rl-input"
-          style="flex:1;resize:none;"
-          placeholder="Paste chunks here, separated by blank lines…"
-          v-model="cvcAdhocText"
-        ></textarea>
-        <div style="font-size:11px;color:var(--on-surface-variant);margin-top:6px;flex-shrink:0;">
-          {{ cvcChunks.length }} chunk{{ cvcChunks.length !== 1 ? 's' : '' }} detected
+        <div class="rl-tab-bar" style="flex-shrink:0;">
+          <button class="rl-tab-btn" :class="{ active: cvcTab === 'adhoc' }" @click="cvcTab = 'adhoc'">Ad-hoc</button>
+          <button class="rl-tab-btn" :class="{ active: cvcTab === 'dataset' }" @click="cvcTab = 'dataset'">Dataset</button>
+        </div>
+
+        <div v-if="cvcTab === 'adhoc'" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <textarea
+            class="rl-input"
+            style="flex:1;resize:none;"
+            placeholder="Paste chunks here, separated by blank lines…"
+            v-model="cvcAdhocText"
+          ></textarea>
+          <div style="font-size:11px;color:var(--on-surface-variant);margin-top:6px;flex-shrink:0;">
+            {{ cvcChunks.length }} chunk{{ cvcChunks.length !== 1 ? 's' : '' }} detected
+          </div>
+        </div>
+
+        <div v-if="cvcTab === 'dataset'" style="flex-shrink:0;">
+          <select class="rl-select" v-model="cvcDataset">
+            <option value="">Select a dataset…</option>
+            <option v-for="ds in datasets" :key="ds.id" :value="ds.id">{{ ds.name }}</option>
+          </select>
         </div>
       </div>
 
-      <div v-if="cvcTab === 'dataset'" style="flex-shrink:0;">
-        <select class="rl-select" v-model="cvcDataset">
-          <option value="">Select a dataset…</option>
-          <option v-for="ds in datasets" :key="ds.id" :value="ds.id">{{ ds.name }}</option>
-        </select>
+      <!-- Similarity Matrix (heatmap) -->
+      <div class="rl-card" style="flex-shrink:0;">
+        <div class="rl-label" style="margin-bottom:8px;">SIMILARITY MATRIX (NxN)</div>
+        <div style="background:var(--surface-input);border-radius:4px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:180px;">
+          <EChart v-if="heatmapOption" :option="heatmapOption" height="320px" title="Similarity Matrix" style="width:100%;" />
+          <span v-else style="color:var(--on-surface-variant);font-size:12px;">Run analysis to generate matrix.</span>
+        </div>
       </div>
     </div>
 
-    <!-- RIGHT: Heatmap -->
+    <!-- RIGHT: Stats + Distribution + t-SNE -->
     <div class="rl-panel">
-      <div class="rl-label">Similarity Heatmap</div>
-      <div style="flex:1;background:var(--surface-input);border-radius:4px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:200px;">
-        <img
-          v-if="heatmapB64"
-          :src="'data:image/png;base64,' + heatmapB64"
-          style="width:100%;height:100%;object-fit:contain;display:block;"
-          alt="Similarity heatmap"
-        />
-        <span v-else style="color:var(--on-surface-variant);font-size:12px;">Run analysis to see heatmap.</span>
+
+      <!-- Stat cards -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;flex-shrink:0;">
+        <div style="background:var(--surface-high);border:1px solid var(--border);border-radius:6px;padding:12px;text-align:center;">
+          <div class="rl-label" style="margin-bottom:4px;">AVG SIMILARITY</div>
+          <div style="font-size:28px;font-weight:700;color:var(--on-surface);line-height:1;">
+            {{ cvcAvgSim !== null ? cvcAvgSim.toFixed(2) : '—' }}
+          </div>
+        </div>
+        <div style="background:var(--surface-high);border:1px solid var(--border);border-radius:6px;padding:12px;text-align:center;">
+          <div class="rl-label" style="margin-bottom:4px;">COHESION</div>
+          <div style="font-size:28px;font-weight:700;color:var(--primary);line-height:1;">
+            {{ cvcCohesion !== null ? cvcCohesion.toFixed(0) + '%' : '—' }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Similarity Distribution -->
+      <div style="flex-shrink:0;">
+        <div class="rl-label" style="margin-bottom:6px;">SIMILARITY DISTRIBUTION</div>
+        <div style="background:var(--surface-input);border-radius:4px;overflow:hidden;min-height:80px;display:flex;align-items:center;justify-content:center;">
+          <EChart v-if="cvcDistOption" :option="cvcDistOption" height="120px" title="Similarity Distribution" style="width:100%;" />
+          <span v-else style="color:var(--on-surface-variant);font-size:12px;">No data yet</span>
+        </div>
+      </div>
+
+      <!-- Clustering (t-SNE) -->
+      <div style="flex-shrink:0;">
+        <div class="rl-label" style="margin-bottom:6px;">CLUSTERING (T-SNE)</div>
+        <div style="background:var(--surface-input);border-radius:4px;overflow:hidden;min-height:160px;display:flex;align-items:center;justify-content:center;">
+          <EChart v-if="cvcTsneOption" :option="cvcTsneOption" height="200px" title="Clustering (t-SNE)" style="width:100%;" />
+          <span v-else style="color:var(--on-surface-variant);font-size:12px;">No data yet</span>
+        </div>
       </div>
     </div>
   </div>
