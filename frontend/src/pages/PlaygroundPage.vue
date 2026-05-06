@@ -92,7 +92,12 @@ async function runQuery() {
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     results.value = data.results ?? []
-    stats.value = data.stats ?? null
+    stats.value = {
+      time_ms: data.elapsed_ms ?? null,
+      count: data.total ?? 0,
+      similarity_dist_b64: data.dist_chart ? data.dist_chart.replace(/^data:image\/png;base64,/, '') : null,
+      tsne_b64: data.tsne_chart ? data.tsne_chart.replace(/^data:image\/png;base64,/, '') : null,
+    }
   } catch (e) {
     showToast('Query failed: ' + e.message)
   } finally {

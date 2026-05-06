@@ -413,7 +413,7 @@ def _make_tsne_chart(embeddings: np.ndarray, query_emb: np.ndarray) -> Optional[
         n = len(embeddings)
         perplexity = min(30, max(2, n - 1))
         all_vecs = np.vstack([embeddings, query_emb.reshape(1, -1)])
-        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, n_iter=300)
+        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=300)
         coords = tsne.fit_transform(all_vecs)
         chunk_coords = coords[:-1]
         query_coord = coords[-1]
