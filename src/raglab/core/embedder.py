@@ -131,16 +131,13 @@ class Embedder:
                 raise RuntimeError(f"Embedding API call failed: {str(e)}") from e
         else:
             # 正常 Litellm 解析路径
+            # LiteLLM 的 EmbeddingResponse.data 是 dict 列表，不是对象列表
             try:
-                embeddings = [item.embedding for item in response.data]
-            except (AttributeError, TypeError):
-                # 兼容返回 dict 的情况
-                if isinstance(response, dict) and "data" in response:
-                    embeddings = [item["embedding"] for item in response["data"]]
-                    logger.info(f"Parsed response as dict format, got {len(embeddings)} embeddings")
-                else:
-                    logger.error(f"Unexpected response format: {type(response)}")
-                    raise RuntimeError(f"Unexpected response format: {type(response)}")
+                embeddings = [item["embedding"] for item in response.data]
+                logger.debug(f"Parsed {len(embeddings)} embeddings from response")
+            except (KeyError, TypeError) as parse_err:
+                logger.error(f"Failed to parse embedding response: {parse_err}")
+                raise RuntimeError(f"Failed to parse embedding response: {parse_err}") from parse_err
 
         # Convert to numpy array
         if isinstance(text, str):
