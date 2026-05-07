@@ -29,9 +29,10 @@ const previewChunks = ref([])
 
 // Pagination for saved chunks
 const chunkPage = ref(0)
-const chunkPageSize = ref(20)
+const chunkPageSize = ref(50)
 const chunkTotal = ref(0)
 const chunkTotalPages = ref(0)
+const chunkPageSizeOptions = [20, 50, 100]
 
 // Strategy metadata
 const strategyOptions = [
@@ -614,6 +615,19 @@ onMounted(fetchDatasets)
                 >
                   <span class="material-symbols-outlined" style="font-size:16px;">last_page</span>
                 </button>
+
+                <!-- Page size selector -->
+                <div style="display:flex;align-items:center;gap:4px;margin-left:12px;">
+                  <span style="font-size:11px;color:var(--on-surface-variant);">Per page</span>
+                  <select
+                    class="rl-select"
+                    :value="chunkPageSize"
+                    @change="chunkPageSize = +$event.target.value; goToChunkPage(0)"
+                    style="width:56px;padding:2px 4px;font-size:11px;"
+                  >
+                    <option v-for="s in chunkPageSizeOptions" :key="s" :value="s">{{ s }}</option>
+                  </select>
+                </div>
 
                 <!-- Jump to page -->
                 <div style="display:flex;align-items:center;gap:4px;margin-left:12px;">

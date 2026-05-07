@@ -230,7 +230,7 @@ const dsPreviewChunks = ref([])
 const dsPreviewPage = ref(0)
 const dsPreviewTotal = ref(0)
 const dsPreviewTotalPages = ref(0)
-const dsPreviewPageSize = 15
+const dsPreviewPageSize = 10
 
 async function toggleDsPreview() {
   if (dsPreviewOpen.value) {
@@ -347,7 +347,7 @@ const cvcPreviewChunks = ref([])
 const cvcPreviewPage = ref(0)
 const cvcPreviewTotal = ref(0)
 const cvcPreviewTotalPages = ref(0)
-const cvcPreviewPageSize = 15
+const cvcPreviewPageSize = 10
 
 async function toggleCvcPreview() {
   if (cvcPreviewOpen.value) {
@@ -581,7 +581,7 @@ async function runCvc() {
           </div>
 
           <!-- Dataset chunks preview with pagination -->
-          <div v-if="dsPreviewOpen && dsPreviewChunks.length" style="margin-top:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-input);max-height:200px;overflow-y:auto;">
+          <div v-if="dsPreviewOpen && dsPreviewChunks.length" style="margin-top:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-input);overflow-y:auto;flex-shrink:1;min-height:0;">
             <div
               v-for="(chunk, i) in dsPreviewChunks"
               :key="chunk.id ?? i"
@@ -780,7 +780,7 @@ async function runCvc() {
               <span v-if="cvcPreviewOpen && cvcPreviewTotal > 0" style="font-family:'JetBrains Mono',monospace;margin-left:4px;">({{ cvcPreviewTotal }})</span>
             </button>
           </div>
-          <div v-if="cvcPreviewOpen && cvcPreviewChunks.length" style="margin-top:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-input);max-height:200px;overflow-y:auto;">
+          <div v-if="cvcPreviewOpen && cvcPreviewChunks.length" style="margin-top:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-input);overflow-y:auto;flex-shrink:1;min-height:0;">
             <div
               v-for="(chunk, i) in cvcPreviewChunks"
               :key="chunk.id ?? i"
