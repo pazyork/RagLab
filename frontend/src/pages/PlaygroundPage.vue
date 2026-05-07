@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import EChart from '../components/EChart.vue'
 
 // ── ECharts theme helpers ─────────────────────────────────────────────────────
-const C = { primary: '#38bdf8', grid: '#2D2D2D', text: '#bdc8d1', bg: '#131313', surface: '#1c1b1b' }
+const C = { primary: '#7ab8d4', grid: '#1e1e1e', text: '#8a8884', bg: '#0a0a0a', surface: '#141414', green: '#39d98a', orange: '#e8a855', red: '#e8655a' }
 
 function makeHistOption(scores, title = '') {
   if (!scores?.length) return null
@@ -22,7 +22,7 @@ function makeHistOption(scores, title = '') {
     grid: { left: 40, right: 16, top: 16, bottom: 36 },
     xAxis: { type: 'category', data: xData, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { show: false } },
     yAxis: { type: 'value', axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } }, splitLine: { lineStyle: { color: C.grid } } },
-    series: [{ type: 'bar', data: counts, itemStyle: { color: C.primary, borderRadius: [2, 2, 0, 0] }, barMaxWidth: 32 }],
+    series: [{ type: 'bar', data: counts, itemStyle: { color: C.green, borderRadius: [2, 2, 0, 0] }, barMaxWidth: 32 }],
   }
 }
 
@@ -43,7 +43,7 @@ function makeHeatmapOption(matrix, labels) {
     grid: { left: 160, right: 80, top: 16, bottom: 120 },
     xAxis: { type: 'category', data: shortLabels, axisLabel: { color: C.text, fontSize: 10, rotate: 30, interval: 0 }, axisLine: { lineStyle: { color: C.grid } }, splitArea: { show: true, areaStyle: { color: [C.bg, C.surface] } } },
     yAxis: { type: 'category', data: shortLabels, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } }, splitArea: { show: true, areaStyle: { color: [C.bg, C.surface] } } },
-    visualMap: { min: 0, max: 1, calculable: true, orient: 'vertical', right: 8, top: 'center', textStyle: { color: C.text, fontSize: 10 }, inRange: { color: ['#ffffcc', '#fd8d3c', '#800026'] } },
+    visualMap: { min: 0, max: 1, calculable: true, orient: 'vertical', right: 8, top: 'center', textStyle: { color: C.text, fontSize: 10 }, inRange: { color: ['#2a1a1a', '#e8655a', '#e8a855', '#39d98a'] } },
     series: [{
       type: 'heatmap', data,
       label: { show: n <= 12, formatter: p => p.data[2].toFixed(2), fontSize: 9, color: '#fff' },
@@ -76,7 +76,7 @@ function makeScatterOption(points) {
         name: 'Chunks', type: 'scatter',
         data: chunks.map(p => [p.x, p.y, p.index, p.type, p.text]),
         symbolSize: 10,
-        itemStyle: { color: C.primary },
+        itemStyle: { color: C.green },
         label: {
           show: true,
           formatter: p => {
@@ -91,8 +91,8 @@ function makeScatterOption(points) {
         name: 'Query', type: 'scatter',
         data: query.map(p => [p.x, p.y, p.index, p.type, p.text]),
         symbol: 'diamond', symbolSize: 14,
-        itemStyle: { color: '#f59e0b' },
-        label: { show: true, formatter: 'Query', position: 'top', fontSize: 9, color: '#f59e0b' },
+        itemStyle: { color: C.orange },
+        label: { show: true, formatter: 'Query', position: 'top', fontSize: 9, color: C.orange },
       }] : []),
     ],
   }
@@ -118,7 +118,7 @@ function makeCvcScatterOption(points) {
       type: 'scatter',
       data: points.map(p => [p.x, p.y, p.index, p.text]),
       symbolSize: 10,
-      itemStyle: { color: C.primary },
+      itemStyle: { color: C.green },
       label: {
         show: true,
         formatter: p => {
@@ -236,7 +236,9 @@ async function runQuery() {
 }
 
 function scoreClass(score) {
-  return score >= 0.8 ? 'rl-score-high' : 'rl-score-mid'
+  if (score >= 0.8) return 'rl-score-high'
+  if (score >= 0.5) return 'rl-score-mid'
+  return 'rl-score-low'
 }
 
 // ── Chunk vs Chunk ────────────────────────────────────────────────────────────
@@ -459,14 +461,14 @@ async function runCvc() {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="rl-card" style="text-align:center;">
           <div class="rl-label" style="margin-bottom:4px;">Retrieval Time</div>
-          <div style="font-size:28px;font-weight:700;color:var(--primary);font-family:'JetBrains Mono',monospace;">
+          <div class="rl-num" style="font-size:28px;">
             {{ stats ? stats.time_ms : '—' }}
           </div>
           <div style="font-size:11px;color:var(--on-surface-variant);">ms</div>
         </div>
         <div class="rl-card" style="text-align:center;">
           <div class="rl-label" style="margin-bottom:4px;">Chunks</div>
-          <div style="font-size:28px;font-weight:700;color:var(--primary);font-family:'JetBrains Mono',monospace;">
+          <div class="rl-num" style="font-size:28px;">
             {{ stats ? stats.count : '—' }}
           </div>
           <div style="font-size:11px;color:var(--on-surface-variant);">retrieved</div>
@@ -593,13 +595,13 @@ async function runCvc() {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;flex-shrink:0;">
         <div style="background:var(--surface-high);border:1px solid var(--border);border-radius:6px;padding:12px;text-align:center;">
           <div class="rl-label" style="margin-bottom:4px;">AVG SIMILARITY</div>
-          <div style="font-size:28px;font-weight:700;color:var(--on-surface);line-height:1;">
+          <div class="rl-num" style="font-size:28px;line-height:1;">
             {{ cvcAvgSim !== null ? cvcAvgSim.toFixed(2) : '—' }}
           </div>
         </div>
         <div style="background:var(--surface-high);border:1px solid var(--border);border-radius:6px;padding:12px;text-align:center;">
           <div class="rl-label" style="margin-bottom:4px;">COHESION</div>
-          <div style="font-size:28px;font-weight:700;color:var(--primary);line-height:1;">
+          <div class="rl-num" style="font-size:28px;line-height:1;">
             {{ cvcCohesion !== null ? cvcCohesion.toFixed(0) + '%' : '—' }}
           </div>
         </div>

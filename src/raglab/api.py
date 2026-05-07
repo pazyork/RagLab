@@ -74,7 +74,8 @@ class ChunkTextInput(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
-    chunks: list[str]
+    chunks: list[str] = []
+    dataset_id: Optional[int] = None
     strategy: str = "dense"
     model_id: Optional[int] = None
     top_k: int = 10
@@ -82,7 +83,8 @@ class QueryRequest(BaseModel):
 
 
 class ChunkVsChunkRequest(BaseModel):
-    chunks: list[str]
+    chunks: list[str] = []
+    dataset_id: Optional[int] = None
     strategy: str = "dense"
     model_id: Optional[int] = None
     max_n: int = 30
@@ -223,10 +225,57 @@ def delete_dataset(dataset_id: int):
     return {"ok": True}
 
 
+@app.delete("/api/datasets/{dataset_id}/chunks")
+def clear_chunks(dataset_id: int):
+    """Delete all chunks for a dataset (clear source content)."""
+    db = _db()
+    cursor = db.conn.cursor()
+    cursor.execute("DELETE FROM case_chunks WHERE case_id = ?", (dataset_id,))
+    db.conn.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/datasets/{dataset_id}/chunks/{chunk_id}")
+def delete_chunk(dataset_id: int, chunk_id: int):
+    """Delete a single chunk."""
+    db = _db()
+    cursor = db.conn.cursor()
+    cursor.execute("DELETE FROM case_chunks WHERE id = ? AND case_id = ?", (chunk_id, dataset_id))
+    db.conn.commit()
+    return {"ok": True}
+
+
 @app.get("/api/datasets/{dataset_id}/chunks")
 def get_chunks(dataset_id: int):
     rows = _db().get_chunks(dataset_id)
     return [{"id": r[0], "index": r[2], "content": r[3]} for r in rows]
+
+def _split_text(text: str, strategy: str, chunk_size: int, overlap: int) -> list[str]:
+    """Split text using the given strategy and deduplicate by normalized content."""
+    if strategy == "lines":
+        raw = split_lines(text)
+    elif strategy == "fixed":
+        raw = split_by_char(text, chunk_size=chunk_size, overlap=overlap)
+    else:
+        raw = split_by_recursive(text, chunk_size=chunk_size, chunk_overlap=overlap)
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for c in raw:
+        key = c.strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(c)
+    return unique
+
+
+@app.post("/api/preview-chunks")
+def preview_chunks(body: ChunkTextInput):
+    """Chunk text without saving — truncates to first 100 lines for speed."""
+    lines = body.text.split("\n")[:100]
+    text = "\n".join(lines)
+    chunks = _split_text(text, body.strategy, body.chunk_size, body.overlap)
+    return {"chunk_count": len(chunks), "chunks": chunks[:20]}
 
 
 @app.post("/api/datasets/{dataset_id}/chunks")
@@ -236,14 +285,7 @@ def set_chunks(dataset_id: int, body: ChunkTextInput):
     cursor.execute("DELETE FROM case_chunks WHERE case_id = ?", (dataset_id,))
     db.conn.commit()
 
-    text = body.text
-    if body.strategy == "lines":
-        chunks = split_lines(text)
-    elif body.strategy == "fixed":
-        chunks = split_by_char(text, chunk_size=body.chunk_size, overlap=body.overlap)
-    else:
-        chunks = split_by_recursive(text, chunk_size=body.chunk_size, chunk_overlap=body.overlap)
-
+    chunks = _split_text(body.text, body.strategy, body.chunk_size, body.overlap)
     db.add_chunks(dataset_id, chunks)
     return {"chunk_count": len(chunks), "chunks": chunks[:5]}
 
@@ -293,6 +335,12 @@ def save_config(body: ConfigSave):
 async def playground_query(body: QueryRequest):
     t0 = time.time()
     chunks = body.chunks
+
+    # Load chunks from dataset if dataset_id provided
+    if not chunks and body.dataset_id is not None:
+        rows = _db().get_chunks(body.dataset_id)
+        chunks = [r[3] for r in rows]  # r[3] = content column
+
     if not chunks:
         raise HTTPException(400, "No chunks provided")
 
@@ -348,7 +396,14 @@ async def playground_query(body: QueryRequest):
 
 @app.post("/api/playground/chunk-vs-chunk")
 async def chunk_vs_chunk(body: ChunkVsChunkRequest):
-    chunks = body.chunks[:body.max_n]
+    chunks = body.chunks
+
+    # Load chunks from dataset if dataset_id provided
+    if not chunks and body.dataset_id is not None:
+        rows = _db().get_chunks(body.dataset_id)
+        chunks = [r[3] for r in rows]
+
+    chunks = chunks[:body.max_n]
     if len(chunks) < 2:
         raise HTTPException(400, "Need at least 2 chunks")
 

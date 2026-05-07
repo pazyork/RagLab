@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const datasets = ref([])
@@ -16,12 +16,64 @@ const pasteText = ref('')
 const uploadLoading = ref(false)
 const pasteLoading = ref(false)
 
+// Raw text stored locally — Apply sends this + strategy params to API
+const rawText = ref('')
+const rawTextLabel = ref('')  // filename or "pasted text"
+
 // Chunking config
 const chunkStrategy = ref('recursive')
 const chunkSize = ref(512)
 const chunkOverlap = ref(64)
 const applyingChunks = ref(false)
 const previewChunks = ref([])
+
+// Strategy metadata
+const strategyOptions = [
+  { value: 'recursive', label: 'Recursive', desc: 'Splits on paragraphs → sentences → characters (recommended)' },
+  { value: 'fixed',     label: 'Fixed Size', desc: 'Splits every N characters with overlap' },
+  { value: 'lines',     label: 'By Lines',   desc: 'One chunk per non-empty line' },
+]
+const currentStrategyDesc = computed(() =>
+  strategyOptions.find(s => s.value === chunkStrategy.value)?.desc ?? ''
+)
+const showSizeParams = computed(() => chunkStrategy.value !== 'lines')
+const canApply = computed(() => !!rawText.value && !!selectedSource.value)
+
+// Live preview (debounced, no DB write)
+const previewLoading = ref(false)
+const previewCount = ref(null)   // total chunks from last preview call
+let _previewTimer = null
+
+async function fetchPreview() {
+  if (!rawText.value) return
+  previewLoading.value = true
+  try {
+    const res = await fetch('/api/preview-chunks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: rawText.value,
+        strategy: chunkStrategy.value,
+        chunk_size: chunkSize.value,
+        overlap: chunkOverlap.value,
+      }),
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    previewCount.value = data.chunk_count
+    previewChunks.value = (data.chunks ?? []).map((text, i) => ({ content: text, index: i }))
+  } catch { /* silent */ } finally {
+    previewLoading.value = false
+  }
+}
+
+function schedulePreview() {
+  if (!rawText.value) return
+  clearTimeout(_previewTimer)
+  _previewTimer = setTimeout(fetchPreview, 400)
+}
+
+watch([rawText, chunkStrategy, chunkSize, chunkOverlap], schedulePreview)
 
 const toast = ref('')
 
@@ -77,6 +129,36 @@ async function deleteDataset(ds, e) {
   }
 }
 
+async function clearSource(ds, e) {
+  e.stopPropagation()
+  if (!confirm(`Clear all chunks from "${ds.name}"?`)) return
+  try {
+    const res = await fetch(`/api/datasets/${ds.id}/chunks`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(await res.text())
+    previewChunks.value = []
+    previewCount.value = null
+    rawText.value = ''
+    rawTextLabel.value = ''
+    await fetchDatasets()
+    showToast('All chunks cleared.')
+  } catch (e) {
+    showToast('Clear failed: ' + e.message)
+  }
+}
+
+async function deleteChunk(chunk, e) {
+  e.stopPropagation()
+  try {
+    const res = await fetch(`/api/datasets/${selectedSource.value.id}/chunks/${chunk.id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(await res.text())
+    previewChunks.value = previewChunks.value.filter(c => c.id !== chunk.id)
+    previewCount.value = previewCount.value ? previewCount.value - 1 : null
+    await fetchDatasets()
+  } catch (e) {
+    showToast('Delete chunk failed: ' + e.message)
+  }
+}
+
 function selectDataset(ds) {
   selectedDataset.value = ds
   selectedSource.value = null
@@ -87,13 +169,15 @@ function selectDataset(ds) {
 
 function selectSource(ds) {
   selectedSource.value = ds
+  rawText.value = ''
+  rawTextLabel.value = ''
   previewChunks.value = []
   loadPreview(ds)
 }
 
 async function loadPreview(ds) {
   try {
-    const res = await fetch(`/api/datasets/${ds.id}/chunks?limit=20`)
+    const res = await fetch(`/api/datasets/${ds.id}/chunks`)
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
     previewChunks.value = Array.isArray(data) ? data : (data.chunks ?? [])
@@ -102,7 +186,7 @@ async function loadPreview(ds) {
   }
 }
 
-// File upload
+// File upload — read file locally, store as rawText
 const fileInput = ref(null)
 
 async function handleFileUpload(e) {
@@ -110,19 +194,14 @@ async function handleFileUpload(e) {
   if (!file || !selectedDataset.value) return
   uploadLoading.value = true
   try {
-    const form = new FormData()
-    form.append('file', file)
-    const res = await fetch(`/api/datasets/${selectedDataset.value.id}/upload`, {
-      method: 'POST',
-      body: form,
-    })
-    if (!res.ok) throw new Error(await res.text())
-    showToast('File uploaded successfully.')
+    rawText.value = await file.text()
+    rawTextLabel.value = file.name
     showUpload.value = false
-    await fetchDatasets()
-    selectSource(selectedDataset.value)
+    selectedSource.value = selectedDataset.value
+    previewChunks.value = []
+    showToast(`"${file.name}" loaded (${rawText.value.length} chars) — configure chunking and click Apply.`)
   } catch (e) {
-    showToast('Upload failed: ' + e.message)
+    showToast('Read failed: ' + e.message)
   } finally {
     uploadLoading.value = false
     if (fileInput.value) fileInput.value.value = ''
@@ -131,43 +210,38 @@ async function handleFileUpload(e) {
 
 async function loadPastedText() {
   if (!pasteText.value.trim() || !selectedDataset.value) return
-  pasteLoading.value = true
-  try {
-    const res = await fetch(`/api/datasets/${selectedDataset.value.id}/chunks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: pasteText.value }),
-    })
-    if (!res.ok) throw new Error(await res.text())
-    showToast('Text loaded successfully.')
-    pasteText.value = ''
-    showPaste.value = false
-    await fetchDatasets()
-    selectSource(selectedDataset.value)
-  } catch (e) {
-    showToast('Load failed: ' + e.message)
-  } finally {
-    pasteLoading.value = false
-  }
+  rawText.value = pasteText.value.trim()
+  rawTextLabel.value = 'pasted text'
+  pasteText.value = ''
+  showPaste.value = false
+  selectedSource.value = selectedDataset.value
+  previewChunks.value = []
+  showToast('Text ready — configure chunking and click Apply.')
 }
 
 async function applyChunking() {
-  if (!selectedSource.value) return
+  if (!canApply.value) return
   applyingChunks.value = true
   try {
-    const res = await fetch(`/api/datasets/${selectedSource.value.id}/rechunk`, {
+    const res = await fetch(`/api/datasets/${selectedSource.value.id}/chunks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        text: rawText.value,
         strategy: chunkStrategy.value,
         chunk_size: chunkSize.value,
         overlap: chunkOverlap.value,
       }),
     })
     if (!res.ok) throw new Error(await res.text())
-    showToast('Chunking applied.')
+    const data = await res.json()
+    showToast(`${data.chunk_count} chunks saved.`)
+    // Show preview from response (API returns first 5 as strings)
+    previewChunks.value = (data.chunks ?? []).map((text, i) => ({ content: text, index: i }))
     await fetchDatasets()
-    await loadPreview(selectedSource.value)
+    // Refresh selectedDataset reference
+    const refreshed = datasets.value.find(d => d.id === selectedSource.value.id)
+    if (refreshed) { selectedDataset.value = refreshed; selectedSource.value = refreshed }
   } catch (e) {
     showToast('Apply failed: ' + e.message)
   } finally {
@@ -226,7 +300,10 @@ onMounted(fetchDatasets)
             <span class="material-symbols-outlined" style="font-size:16px;color:var(--on-surface-variant);">folder</span>
             <div style="min-width:0;">
               <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ ds.name }}</div>
-              <div style="font-size:11px;color:var(--on-surface-variant);">{{ ds.chunk_count ?? 0 }} chunks</div>
+              <div style="font-size:11px;">
+                  <span class="rl-num">{{ ds.chunk_count ?? 0 }}</span>
+                  <span style="color:var(--on-surface-variant);"> chunks</span>
+                </div>
             </div>
           </div>
           <button
@@ -308,15 +385,28 @@ onMounted(fetchDatasets)
             class="rl-dataset-item"
             :class="{ active: selectedSource?.id === selectedDataset.id }"
             @click="selectSource(selectedDataset)"
-            style="margin:4px;"
+            style="margin:4px;padding-right:56px;"
           >
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="material-symbols-outlined" style="font-size:16px;color:var(--on-surface-variant);">description</span>
               <div>
                 <div style="font-size:13px;font-weight:600;">{{ selectedDataset.name }}</div>
-                <div style="font-size:11px;color:var(--on-surface-variant);">{{ selectedDataset.chunk_count ?? 0 }} chunks</div>
+                <div style="font-size:11px;">
+                  <span class="rl-num">{{ selectedDataset.chunk_count ?? 0 }}</span>
+                  <span style="color:var(--on-surface-variant);"> chunks</span>
+                </div>
               </div>
             </div>
+            <!-- Clear all chunks button -->
+            <button
+              v-if="(selectedDataset.chunk_count ?? 0) > 0"
+              class="rl-btn-icon"
+              style="position:absolute;right:4px;top:50%;transform:translateY(-50%);"
+              title="Clear all chunks"
+              @click="clearSource(selectedDataset, $event)"
+            >
+              <span class="material-symbols-outlined" style="font-size:16px;">delete_sweep</span>
+            </button>
           </div>
         </div>
       </template>
@@ -345,13 +435,12 @@ onMounted(fetchDatasets)
               <div>
                 <label class="rl-label" style="display:block;margin-bottom:6px;">Strategy</label>
                 <select class="rl-select" v-model="chunkStrategy">
-                  <option value="recursive">Recursive</option>
-                  <option value="fixed">Fixed Length</option>
-                  <option value="lines">By Lines</option>
+                  <option v-for="s in strategyOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
                 </select>
+                <p style="margin:4px 0 0;font-size:11px;color:var(--on-surface-variant);">{{ currentStrategyDesc }}</p>
               </div>
 
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div v-if="showSizeParams" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div>
                   <label class="rl-label" style="display:block;margin-bottom:6px;">Chunk Size</label>
                   <input class="rl-input" type="number" min="64" max="4096" v-model.number="chunkSize" />
@@ -362,7 +451,16 @@ onMounted(fetchDatasets)
                 </div>
               </div>
 
-              <button class="rl-btn-primary" :disabled="applyingChunks" @click="applyChunking" style="width:auto;align-self:flex-start;padding:8px 24px;">
+              <!-- Raw text status -->
+              <div v-if="rawText" style="font-size:11px;color:var(--primary);display:flex;align-items:center;gap:4px;">
+                <span class="material-symbols-outlined" style="font-size:13px;">check_circle</span>
+                {{ rawTextLabel }} ready ({{ rawText.length }} chars)
+              </div>
+              <div v-else-if="selectedSource" style="font-size:11px;color:var(--on-surface-variant);">
+                Paste or upload text to enable re-chunking.
+              </div>
+
+              <button class="rl-btn-primary" :disabled="applyingChunks || !canApply" @click="applyChunking" style="width:auto;align-self:flex-start;padding:8px 24px;">
                 <span class="material-symbols-outlined" style="font-size:16px;">check</span>
                 {{ applyingChunks ? 'Applying…' : 'Apply' }}
               </button>
@@ -374,26 +472,45 @@ onMounted(fetchDatasets)
             <div style="font-weight:700;font-size:14px;margin-bottom:16px;display:flex;align-items:center;gap:8px;">
               <span class="material-symbols-outlined" style="color:var(--primary);">preview</span>
               Chunking Preview
-              <span style="font-size:12px;color:var(--on-surface-variant);font-weight:400;">(first 20 chunks)</span>
+              <span v-if="previewLoading" style="font-size:11px;color:var(--on-surface-variant);font-weight:400;">computing…</span>
+              <span v-else-if="previewCount !== null" style="font-size:11px;color:var(--on-surface-variant);font-weight:400;">
+                first {{ previewChunks.length }} of {{ previewCount }} chunks
+                <span v-if="rawText" style="color:var(--primary);margin-left:4px;">· preview only</span>
+              </span>
+              <span v-else style="font-size:12px;color:var(--on-surface-variant);font-weight:400;">(first 20 chunks)</span>
             </div>
 
             <div v-if="!previewChunks.length" style="color:var(--on-surface-variant);font-size:12px;">
-              No chunks yet. Upload a file or paste text, then apply chunking.
+              {{ rawText ? 'Computing preview…' : 'Load text to see a live preview.' }}
             </div>
 
             <div v-else style="display:flex;flex-direction:column;gap:8px;">
               <div
                 v-for="(chunk, i) in previewChunks"
-                :key="i"
+                :key="chunk.id ?? i"
                 class="rl-chunk-item"
+                style="position:relative;"
               >
-                <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-                  <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--on-surface-variant);">#{{ i + 1 }}</span>
-                  <span style="font-size:10px;color:var(--on-surface-variant);">{{ (chunk.text ?? chunk).length }} chars</span>
+                <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-right:24px;">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--on-surface-variant);">#{{ (chunk.index ?? i) + 1 }}</span>
+                  <span class="rl-num" style="font-size:10px;">{{ (chunk.content ?? chunk).length }}</span>
+                  <span style="font-size:10px;color:var(--on-surface-variant);">chars</span>
                 </div>
                 <p style="margin:0;font-size:12px;color:var(--on-surface-variant);font-family:'JetBrains Mono',monospace;white-space:pre-wrap;word-break:break-all;">
-                  {{ (chunk.text ?? chunk).slice(0, 300) }}{{ (chunk.text ?? chunk).length > 300 ? '…' : '' }}
+                  {{ (chunk.content ?? chunk).slice(0, 300) }}{{ (chunk.content ?? chunk).length > 300 ? '…' : '' }}
                 </p>
+                <!-- Delete single chunk (only when viewing saved chunks, not preview) -->
+                <button
+                  v-if="chunk.id"
+                  class="rl-btn-icon"
+                  style="position:absolute;top:6px;right:6px;opacity:0.4;"
+                  title="Delete this chunk"
+                  @click="deleteChunk(chunk, $event)"
+                  @mouseenter="$event.target.closest('button').style.opacity='1'"
+                  @mouseleave="$event.target.closest('button').style.opacity='0.4'"
+                >
+                  <span class="material-symbols-outlined" style="font-size:14px;">close</span>
+                </button>
               </div>
             </div>
           </div>

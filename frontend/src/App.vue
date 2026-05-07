@@ -3,6 +3,7 @@ import { ref, computed, shallowRef } from 'vue'
 import PlaygroundPage from './pages/PlaygroundPage.vue'
 import DatasetsPage from './pages/DatasetsPage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
+import AnimatedBg from './components/AnimatedBg.vue'
 
 const page = ref('playground')
 const view = ref('query_vs_chunks')
@@ -22,10 +23,11 @@ function toggleLang() {
 </script>
 
 <template>
-  <div id="app-shell">
+  <AnimatedBg />
+  <div id="app-shell" style="position:relative;z-index:1;">
     <!-- Header -->
     <header id="app-header">
-      <span style="font-size:16px;font-weight:700;color:var(--primary);letter-spacing:0.04em;flex-shrink:0;">RAGLab</span>
+      <span style="font-size:16px;font-weight:700;color:#ffffff;letter-spacing:0.06em;flex-shrink:0;font-family:'Inter',sans-serif;">RAGLab</span>
 
       <!-- View toggle — only on playground -->
       <div style="flex:1;display:flex;justify-content:center;">
