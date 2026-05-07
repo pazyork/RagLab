@@ -353,6 +353,21 @@ def save_config(body: ConfigSave):
 
 
 # ---------------------------------------------------------------------------
+# Embedding cache management
+# ---------------------------------------------------------------------------
+
+@app.get("/api/cache/stats")
+def cache_stats():
+    return _db().get_cache_stats()
+
+
+@app.delete("/api/cache")
+def clear_cache():
+    count = _db().clear_cache()
+    return {"ok": True, "deleted": count}
+
+
+# ---------------------------------------------------------------------------
 # Embedding cache helper
 # ---------------------------------------------------------------------------
 
