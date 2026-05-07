@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import EChart from '../components/EChart.vue'
 
 // ── ECharts theme helpers ─────────────────────────────────────────────────────
-const C = { primary: '#7ab8d4', grid: '#1e1e1e', text: '#8a8884', bg: '#0a0a0a', surface: '#141414', green: '#39d98a', orange: '#e8a855', red: '#e8655a' }
+const C = { primary: '#39d98a', grid: '#1e1e1e', text: '#8a8884', bg: '#0a0a0a', surface: '#141414', green: '#39d98a', orange: '#e8a855', red: '#e8655a' }
 
 function makeHistOption(scores, title = '') {
   if (!scores?.length) return null
@@ -603,9 +603,9 @@ async function runCvc() {
                 <button
                   v-else
                   :style="{
-                    background: p === dsPreviewPage ? 'var(--primary)' : 'transparent',
-                    color: p === dsPreviewPage ? 'var(--on-primary)' : 'var(--on-surface-variant)',
-                    border: '1px solid ' + (p === dsPreviewPage ? 'var(--primary)' : 'var(--border)'),
+                    background: p === dsPreviewPage ? 'var(--highlight)' : 'transparent',
+                    color: p === dsPreviewPage ? 'var(--on-highlight)' : 'var(--on-surface-variant)',
+                    border: '1px solid ' + (p === dsPreviewPage ? 'var(--highlight)' : 'var(--border)'),
                     borderRadius: '4px', padding: '1px 6px', fontSize: '10px',
                     fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer', minWidth: '22px',
                   }"
@@ -801,9 +801,9 @@ async function runCvc() {
                 <button
                   v-else
                   :style="{
-                    background: p === cvcPreviewPage ? 'var(--primary)' : 'transparent',
-                    color: p === cvcPreviewPage ? 'var(--on-primary)' : 'var(--on-surface-variant)',
-                    border: '1px solid ' + (p === cvcPreviewPage ? 'var(--primary)' : 'var(--border)'),
+                    background: p === cvcPreviewPage ? 'var(--highlight)' : 'transparent',
+                    color: p === cvcPreviewPage ? 'var(--on-highlight)' : 'var(--on-surface-variant)',
+                    border: '1px solid ' + (p === cvcPreviewPage ? 'var(--highlight)' : 'var(--border)'),
                     borderRadius: '4px', padding: '1px 6px', fontSize: '10px',
                     fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer', minWidth: '22px',
                   }"

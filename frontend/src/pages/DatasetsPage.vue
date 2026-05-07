@@ -587,9 +587,9 @@ onMounted(fetchDatasets)
                   <button
                     v-else
                     :style="{
-                      background: p === chunkPage ? 'var(--primary)' : 'transparent',
-                      color: p === chunkPage ? 'var(--on-primary)' : 'var(--on-surface-variant)',
-                      border: '1px solid ' + (p === chunkPage ? 'var(--primary)' : 'var(--border)'),
+                      background: p === chunkPage ? 'var(--highlight)' : 'transparent',
+                      color: p === chunkPage ? 'var(--on-highlight)' : 'var(--on-surface-variant)',
+                      border: '1px solid ' + (p === chunkPage ? 'var(--highlight)' : 'var(--border)'),
                       borderRadius: '6px', padding: '2px 8px', fontSize: '12px',
                       fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer', minWidth: '28px',
                     }"
