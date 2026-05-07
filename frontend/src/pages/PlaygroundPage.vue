@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import EChart from '../components/EChart.vue'
+import { fetchJson } from '../utils/api.js'
 
 // ── ECharts theme helpers ─────────────────────────────────────────────────────
 const C = { primary: '#39d98a', grid: '#1e1e1e', text: '#8a8884', bg: '#0a0a0a', surface: '#141414', green: '#39d98a', orange: '#e8a855', red: '#e8655a' }
@@ -181,9 +182,7 @@ function showToast(msg, duration = 3000) {
 
 async function fetchModels() {
   try {
-    const res = await fetch('/api/models')
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
+    const data = await fetchJson('/api/models')
     models.value = data
     if (data.length) selectedModel.value = data[0].id
   } catch (e) {
@@ -216,9 +215,7 @@ const activeChunks = computed(() => {
 
 async function fetchDatasets() {
   try {
-    const res = await fetch('/api/datasets')
-    if (!res.ok) throw new Error(await res.text())
-    datasets.value = await res.json()
+    datasets.value = await fetchJson('/api/datasets')
   } catch (e) {
     showToast('Failed to load datasets: ' + e.message)
   }
@@ -231,6 +228,7 @@ const dsPreviewPage = ref(0)
 const dsPreviewTotal = ref(0)
 const dsPreviewTotalPages = ref(0)
 const dsPreviewPageSize = 10
+let _dsPreviewGen = 0  // race condition guard
 
 async function toggleDsPreview() {
   if (dsPreviewOpen.value) {
@@ -245,11 +243,11 @@ async function toggleDsPreview() {
 
 async function loadDsPreview(page) {
   if (!selectedDataset.value) return
+  const gen = ++_dsPreviewGen
   dsPreviewPage.value = page
   try {
-    const res = await fetch(`/api/datasets/${selectedDataset.value}/chunks?page=${page}&page_size=${dsPreviewPageSize}`)
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
+    const data = await fetchJson(`/api/datasets/${selectedDataset.value}/chunks?page=${page}&page_size=${dsPreviewPageSize}`)
+    if (gen !== _dsPreviewGen) return  // stale
     if (data.items) {
       dsPreviewChunks.value = data.items
       dsPreviewTotal.value = data.total
@@ -260,6 +258,7 @@ async function loadDsPreview(page) {
       dsPreviewTotalPages.value = 1
     }
   } catch {
+    if (gen !== _dsPreviewGen) return
     dsPreviewChunks.value = []
   }
 }
@@ -300,13 +299,11 @@ async function runQuery() {
       top_k: topK.value,
       threshold: threshold.value,
     }
-    const res = await fetch('/api/playground/query', {
+    const data = await fetchJson('/api/playground/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
     results.value = data.results ?? []
     stats.value = { time_ms: data.elapsed_ms ?? null, count: data.total ?? 0 }
     distOption.value = makeHistOption(data.scores ?? [], 'Similarity Distribution')
@@ -348,6 +345,7 @@ const cvcPreviewPage = ref(0)
 const cvcPreviewTotal = ref(0)
 const cvcPreviewTotalPages = ref(0)
 const cvcPreviewPageSize = 10
+let _cvcPreviewGen = 0  // race condition guard
 
 async function toggleCvcPreview() {
   if (cvcPreviewOpen.value) {
@@ -362,11 +360,11 @@ async function toggleCvcPreview() {
 
 async function loadCvcPreview(page) {
   if (!cvcDataset.value) return
+  const gen = ++_cvcPreviewGen
   cvcPreviewPage.value = page
   try {
-    const res = await fetch(`/api/datasets/${cvcDataset.value}/chunks?page=${page}&page_size=${cvcPreviewPageSize}`)
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
+    const data = await fetchJson(`/api/datasets/${cvcDataset.value}/chunks?page=${page}&page_size=${cvcPreviewPageSize}`)
+    if (gen !== _cvcPreviewGen) return  // stale
     if (data.items) {
       cvcPreviewChunks.value = data.items
       cvcPreviewTotal.value = data.total
@@ -377,6 +375,7 @@ async function loadCvcPreview(page) {
       cvcPreviewTotalPages.value = 1
     }
   } catch {
+    if (gen !== _cvcPreviewGen) return
     cvcPreviewChunks.value = []
   }
 }
@@ -417,13 +416,11 @@ async function runCvc() {
       model_id: selectedModel.value,
       max_n: cvcMaxN.value,
     }
-    const res = await fetch('/api/playground/chunk-vs-chunk', {
+    const data = await fetchJson('/api/playground/chunk-vs-chunk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
     cvcAvgSim.value = data.avg_sim ?? null
     cvcCohesion.value = data.cohesion ?? null
     heatmapOption.value = makeHeatmapOption(data.matrix ?? null, data.labels ?? [])

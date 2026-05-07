@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import { fetchJson } from '../utils/api.js'
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const datasets = ref([])
@@ -33,6 +34,7 @@ const chunkPageSize = ref(50)
 const chunkTotal = ref(0)
 const chunkTotalPages = ref(0)
 const chunkPageSizeOptions = [20, 50, 100]
+let _loadPreviewGen = 0  // race condition guard
 
 // Strategy metadata
 const strategyOptions = [
@@ -93,9 +95,7 @@ function showToast(msg, duration = 3500) {
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function fetchDatasets() {
   try {
-    const res = await fetch('/api/datasets')
-    if (!res.ok) throw new Error(await res.text())
-    datasets.value = await res.json()
+    datasets.value = await fetchJson('/api/datasets')
   } catch (e) {
     showToast('Failed to load datasets: ' + e.message)
   }
@@ -105,12 +105,11 @@ async function createDataset() {
   if (!newDatasetName.value.trim()) { showToast('Enter a dataset name.'); return }
   creatingDataset.value = true
   try {
-    const res = await fetch('/api/datasets', {
+    await fetchJson('/api/datasets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newDatasetName.value.trim() }),
     })
-    if (!res.ok) throw new Error(await res.text())
     newDatasetName.value = ''
     showNewForm.value = false
     await fetchDatasets()
@@ -125,8 +124,7 @@ async function deleteDataset(ds, e) {
   e.stopPropagation()
   if (!confirm(`Delete dataset "${ds.name}"?`)) return
   try {
-    const res = await fetch(`/api/datasets/${ds.id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await res.text())
+    await fetchJson(`/api/datasets/${ds.id}`, { method: 'DELETE' })
     if (selectedDataset.value?.id === ds.id) {
       selectedDataset.value = null
       selectedSource.value = null
@@ -141,8 +139,7 @@ async function clearSource(ds, e) {
   e.stopPropagation()
   if (!confirm(`Clear all chunks from "${ds.name}"?`)) return
   try {
-    const res = await fetch(`/api/datasets/${ds.id}/chunks`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await res.text())
+    await fetchJson(`/api/datasets/${ds.id}/chunks`, { method: 'DELETE' })
     previewChunks.value = []
     previewCount.value = null
     rawText.value = ''
@@ -157,8 +154,7 @@ async function clearSource(ds, e) {
 async function deleteChunk(chunk, e) {
   e.stopPropagation()
   try {
-    const res = await fetch(`/api/datasets/${selectedSource.value.id}/chunks/${chunk.id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await res.text())
+    await fetchJson(`/api/datasets/${selectedSource.value.id}/chunks/${chunk.id}`, { method: 'DELETE' })
     previewChunks.value = previewChunks.value.filter(c => c.id !== chunk.id)
     previewCount.value = previewCount.value ? previewCount.value - 1 : null
     await fetchDatasets()
@@ -186,11 +182,11 @@ function selectSource(ds) {
 
 async function loadPreview(ds, page = 0) {
   if (!ds) return
+  const gen = ++_loadPreviewGen
   chunkPage.value = page
   try {
-    const res = await fetch(`/api/datasets/${ds.id}/chunks?page=${page}&page_size=${chunkPageSize.value}`)
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
+    const data = await fetchJson(`/api/datasets/${ds.id}/chunks?page=${page}&page_size=${chunkPageSize.value}`)
+    if (gen !== _loadPreviewGen) return  // stale
     if (data.items) {
       // Paginated response
       previewChunks.value = data.items
@@ -203,6 +199,7 @@ async function loadPreview(ds, page = 0) {
       chunkTotalPages.value = 1
     }
   } catch {
+    if (gen !== _loadPreviewGen) return
     previewChunks.value = []
     chunkTotal.value = 0
     chunkTotalPages.value = 0
@@ -272,7 +269,7 @@ async function applyChunking() {
   if (!canApply.value) return
   applyingChunks.value = true
   try {
-    const res = await fetch(`/api/datasets/${selectedSource.value.id}/chunks`, {
+    const data = await fetchJson(`/api/datasets/${selectedSource.value.id}/chunks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -282,8 +279,6 @@ async function applyChunking() {
         overlap: chunkOverlap.value,
       }),
     })
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
     showToast(`${data.chunk_count} chunks saved.`)
     // Show preview from response (API returns first 5 as strings)
     previewChunks.value = (data.chunks ?? []).map((text, i) => ({ content: text, index: i }))

@@ -3,7 +3,9 @@
 import asyncio
 import base64
 import io
+import json
 import time
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -190,6 +192,30 @@ def test_model(model_id: int):
             except Exception as e:
                 raise HTTPException(500, str(e))
     raise HTTPException(404, "Model not found")
+
+
+@app.get("/api/openrouter/models")
+def list_openrouter_models():
+    """Fetch embedding models from OpenRouter API."""
+    try:
+        url = "https://openrouter.ai/api/v1/models?output_modalities=embeddings"
+        req = urllib.request.Request(url, headers={"User-Agent": "RagLab/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        models = data.get("data", [])
+        # Sort by created timestamp descending (newest first)
+        models.sort(key=lambda m: m.get("created", 0), reverse=True)
+        return [
+            {
+                "id": m["id"],
+                "name": m.get("name", m["id"]),
+                "context_length": m.get("context_length"),
+                "pricing": m.get("pricing", {}).get("prompt", "0"),
+            }
+            for m in models
+        ]
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch models: {str(e)}")
 
 
 # ---------------------------------------------------------------------------

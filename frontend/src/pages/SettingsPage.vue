@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { fetchJson } from '../utils/api.js'
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 const toast = ref('')
@@ -16,9 +17,7 @@ const savingProvider = ref(false)
 
 async function fetchProviders() {
   try {
-    const res = await fetch('/api/providers')
-    if (!res.ok) throw new Error(await res.text())
-    providers.value = await res.json()
+    providers.value = await fetchJson('/api/providers')
   } catch (e) {
     showToast('Failed to load providers: ' + e.message)
   }
@@ -28,12 +27,11 @@ async function saveProvider() {
   if (!newProvider.value.name.trim()) { showToast('Provider name is required.'); return }
   savingProvider.value = true
   try {
-    const res = await fetch('/api/providers', {
+    await fetchJson('/api/providers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newProvider.value),
     })
-    if (!res.ok) throw new Error(await res.text())
     newProvider.value = { name: '', api_key: '', base_url: '' }
     showAddProvider.value = false
     await fetchProviders()
@@ -48,8 +46,7 @@ async function saveProvider() {
 async function deleteProvider(name) {
   if (!confirm(`Delete provider "${name}"?`)) return
   try {
-    const res = await fetch(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await res.text())
+    await fetchJson(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' })
     await fetchProviders()
     showToast('Provider deleted.')
   } catch (e) {
@@ -69,14 +66,32 @@ const showAddModel = ref(false)
 const newModel = ref({ provider_name: '', model_name: '' })
 const savingModel = ref(false)
 const testingModel = ref({})   // { [id]: 'testing' | 'ok' | 'fail' }
+const openrouterModels = ref([])  // fetched models list
+const loadingOpenrouterModels = ref(false)
 
 async function fetchModels() {
   try {
-    const res = await fetch('/api/models')
-    if (!res.ok) throw new Error(await res.text())
-    models.value = await res.json()
+    models.value = await fetchJson('/api/models')
   } catch (e) {
     showToast('Failed to load models: ' + e.message)
+  }
+}
+
+async function fetchOpenrouterModels() {
+  if (openrouterModels.value.length) return  // already loaded
+  loadingOpenrouterModels.value = true
+  try {
+    openrouterModels.value = await fetchJson('/api/openrouter/models')
+  } catch (e) {
+    showToast('Failed to load OpenRouter models: ' + e.message)
+  } finally {
+    loadingOpenrouterModels.value = false
+  }
+}
+
+function onProviderChange() {
+  if (newModel.value.provider_name === 'openrouter') {
+    fetchOpenrouterModels()
   }
 }
 
@@ -84,12 +99,11 @@ async function saveModel() {
   if (!newModel.value.model_name.trim()) { showToast('Model name is required.'); return }
   savingModel.value = true
   try {
-    const res = await fetch('/api/models', {
+    await fetchJson('/api/models', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newModel.value),
     })
-    if (!res.ok) throw new Error(await res.text())
     newModel.value = { provider_name: '', model_name: '' }
     showAddModel.value = false
     await fetchModels()
@@ -104,8 +118,7 @@ async function saveModel() {
 async function testModel(id) {
   testingModel.value[id] = 'testing'
   try {
-    const res = await fetch(`/api/models/${encodeURIComponent(id)}/test`, { method: 'POST' })
-    if (!res.ok) throw new Error(await res.text())
+    await fetchJson(`/api/models/${encodeURIComponent(id)}/test`, { method: 'POST' })
     testingModel.value[id] = 'ok'
     showToast('Model test passed.')
   } catch (e) {
@@ -117,8 +130,7 @@ async function testModel(id) {
 async function deleteModel(id) {
   if (!confirm(`Delete model "${id}"?`)) return
   try {
-    const res = await fetch(`/api/models/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error(await res.text())
+    await fetchJson(`/api/models/${encodeURIComponent(id)}`, { method: 'DELETE' })
     await fetchModels()
     showToast('Model deleted.')
   } catch (e) {
@@ -132,9 +144,7 @@ const savingConfig = ref(false)
 
 async function fetchConfig() {
   try {
-    const res = await fetch('/api/config')
-    if (!res.ok) throw new Error(await res.text())
-    const data = await res.json()
+    const data = await fetchJson('/api/config')
     config.value = { ...config.value, ...data }
   } catch (e) {
     showToast('Failed to load config: ' + e.message)
@@ -144,12 +154,11 @@ async function fetchConfig() {
 async function saveConfig() {
   savingConfig.value = true
   try {
-    const res = await fetch('/api/config', {
+    await fetchJson('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config.value),
     })
-    if (!res.ok) throw new Error(await res.text())
     showToast('Configuration saved.')
   } catch (e) {
     showToast('Save failed: ' + e.message)
@@ -260,15 +269,24 @@ onMounted(() => {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div>
               <label class="rl-label" style="display:block;margin-bottom:4px;">Provider</label>
-              <select class="rl-select" v-model="newModel.provider_name">
+              <select class="rl-select" v-model="newModel.provider_name" @change="onProviderChange">
                 <option value="">Select provider…</option>
                 <option v-for="p in providers" :key="p.name" :value="p.name">{{ p.name }}</option>
               </select>
             </div>
             <div>
               <label class="rl-label" style="display:block;margin-bottom:4px;">Model Name</label>
-              <input class="rl-input" placeholder="e.g. text-embedding-3-small" v-model="newModel.model_name" />
+              <select v-if="newModel.provider_name === 'openrouter'" class="rl-select" v-model="newModel.model_name">
+                <option value="">Select model…</option>
+                <option v-for="m in openrouterModels" :key="m.id" :value="m.id">
+                  {{ m.name }} ({{ m.id }})
+                </option>
+              </select>
+              <input v-else class="rl-input" placeholder="e.g. text-embedding-3-small" v-model="newModel.model_name" />
             </div>
+          </div>
+          <div v-if="newModel.provider_name === 'openrouter' && loadingOpenrouterModels" style="font-size:12px;color:var(--on-surface-variant);">
+            Loading models…
           </div>
           <div style="display:flex;gap:8px;">
             <button class="rl-btn-primary" :disabled="savingModel" @click="saveModel" style="width:auto;padding:8px 24px;">
