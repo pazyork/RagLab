@@ -15,18 +15,18 @@ onMounted(() => {
   let w, h
   let time = 0
 
-  // 3 very subtle orbs — low saturation, barely visible
-  const orbs = [
-    { baseX: 0.25, baseY: 0.3, r: 20, g: 45, b: 60, size: 350, phase: 0, speed: 0.001 },
-    { baseX: 0.75, baseY: 0.6, r: 35, g: 28, b: 50, size: 400, phase: 2, speed: 0.0012 },
-    { baseX: 0.5,  baseY: 0.8, r: 25, g: 50, b: 40, size: 300, phase: 4, speed: 0.0008 },
-  ]
+  // Grid density — larger gap = sparser, more minimal
+  const gap = 60
 
   function resize() {
     w = window.innerWidth
     h = window.innerHeight
-    canvas.width = w
-    canvas.height = h
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = w * dpr
+    canvas.height = h * dpr
+    canvas.style.width = w + 'px'
+    canvas.style.height = h + 'px'
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
   function onMove(e) {
@@ -34,38 +34,100 @@ onMounted(() => {
     targetY = e.clientY
   }
 
+  // Gentle 2D wave offset at a grid point
+  function waveOffset(x, y, t) {
+    const f1 = Math.sin(x * 0.008 + t * 0.003) * Math.cos(y * 0.008 - t * 0.002)
+    const f2 = Math.sin(x * 0.015 + y * 0.012 + t * 0.004) * 0.5
+    return (f1 + f2) * 2 // amplitude in px
+  }
+
   function animate() {
-    mouseX += (targetX - mouseX) * 0.02
-    mouseY += (targetY - mouseY) * 0.02
+    // Smooth mouse follow
+    mouseX += (targetX - mouseX) * 0.03
+    mouseY += (targetY - mouseY) * 0.03
     time++
+    const t = time
 
     ctx.clearRect(0, 0, w, h)
 
-    for (const o of orbs) {
-      // Slow orbit around base position
-      o.phase += o.speed
-      const orbitR = 40
-      const ox = o.baseX * w + Math.cos(o.phase) * orbitR
-      const oy = o.baseY * h + Math.sin(o.phase * 0.7) * orbitR
+    // Draw vertical lines
+    const cols = Math.ceil(w / gap) + 1
+    const rows = Math.ceil(h / gap) + 1
 
-      // Very slight mouse influence (pull toward cursor gently)
-      const dx = mouseX - ox
-      const dy = mouseY - oy
-      const dist = Math.sqrt(dx * dx + dy * dy)
-      const pull = Math.min(dist * 0.015, 30)
-      const angle = Math.atan2(dy, dx)
-      const x = ox + Math.cos(angle) * pull
-      const y = oy + Math.sin(angle) * pull
+    ctx.lineWidth = 0.4
+    ctx.strokeStyle = 'rgba(57, 217, 138, 0.025)'
 
-      // Draw subtle radial glow
-      const alpha = 0.035 + Math.sin(time * 0.008 + o.phase) * 0.01
-      const grad = ctx.createRadialGradient(x, y, 0, x, y, o.size)
-      grad.addColorStop(0, `rgba(${o.r},${o.g},${o.b},${alpha})`)
-      grad.addColorStop(1, `rgba(${o.r},${o.g},${o.b},0)`)
-      ctx.fillStyle = grad
+    for (let i = 0; i < cols; i++) {
+      const baseX = i * gap
       ctx.beginPath()
-      ctx.arc(x, y, o.size, 0, Math.PI * 2)
-      ctx.fill()
+      for (let j = 0; j <= rows; j++) {
+        const baseY = j * gap
+        let dx = waveOffset(baseX, baseY, t)
+        let dy = waveOffset(baseY, baseX, t + 200)
+
+        // Mouse ripple influence — very gentle
+        const mdx = baseX - mouseX
+        const mdy = baseY - mouseY
+        const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
+        if (mdist < 300) {
+          const ripple = Math.sin(mdist * 0.03 - t * 0.08) * (1 - mdist / 300) * 3
+          dx += ripple * (mdx / (mdist + 1))
+          dy += ripple * (mdy / (mdist + 1))
+        }
+
+        if (j === 0) ctx.moveTo(baseX + dx, baseY + dy)
+        else ctx.lineTo(baseX + dx, baseY + dy)
+      }
+      ctx.stroke()
+    }
+
+    // Draw horizontal lines
+    for (let j = 0; j < rows; j++) {
+      const baseY = j * gap
+      ctx.beginPath()
+      for (let i = 0; i <= cols; i++) {
+        const baseX = i * gap
+        let dx = waveOffset(baseX, baseY, t)
+        let dy = waveOffset(baseY, baseX, t + 200)
+
+        const mdx = baseX - mouseX
+        const mdy = baseY - mouseY
+        const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
+        if (mdist < 300) {
+          const ripple = Math.sin(mdist * 0.03 - t * 0.08) * (1 - mdist / 300) * 3
+          dx += ripple * (mdx / (mdist + 1))
+          dy += ripple * (mdy / (mdist + 1))
+        }
+
+        if (i === 0) ctx.moveTo(baseX + dx, baseY + dy)
+        else ctx.lineTo(baseX + dx, baseY + dy)
+      }
+      ctx.stroke()
+    }
+
+    // Subtle accent dots at intersections — extremely faint
+    for (let i = 0; i < cols; i += 2) {
+      for (let j = 0; j < rows; j += 2) {
+        const baseX = i * gap
+        const baseY = j * gap
+        let dx = waveOffset(baseX, baseY, t)
+        let dy = waveOffset(baseY, baseX, t + 200)
+
+        const mdx = baseX - mouseX
+        const mdy = baseY - mouseY
+        const mdist = Math.sqrt(mdx * mdx + mdy * mdy)
+        if (mdist < 300) {
+          const ripple = Math.sin(mdist * 0.03 - t * 0.08) * (1 - mdist / 300) * 3
+          dx += ripple * (mdx / (mdist + 1))
+          dy += ripple * (mdy / (mdist + 1))
+        }
+
+        const alpha = 0.015 + Math.sin(t * 0.01 + i * 0.5 + j * 0.3) * 0.008
+        ctx.fillStyle = `rgba(57, 217, 138, ${alpha})`
+        ctx.beginPath()
+        ctx.arc(baseX + dx, baseY + dy, 1, 0, Math.PI * 2)
+        ctx.fill()
+      }
     }
 
     animId = requestAnimationFrame(animate)

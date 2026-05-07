@@ -29,7 +29,7 @@ from raglab.storage.db import Database
 from raglab.core.embedder import Embedder
 from raglab.core.scorer import dense_score, sparse_score
 from raglab.core.metrics import get_metric
-from raglab.core.splitter import split_by_recursive, split_by_char, split_lines
+from raglab.core.splitter import split_by_recursive, split_by_char, split_lines, split_by_markdown
 
 app = FastAPI(title="RagLab API", version="1.0.0")
 
@@ -281,6 +281,13 @@ def _split_text(text: str, strategy: str, chunk_size: int, overlap: int) -> list
         raw = split_lines(text)
     elif strategy == "fixed":
         raw = split_by_char(text, chunk_size=chunk_size, overlap=overlap)
+    elif strategy == "markdown":
+        chunks = split_by_markdown(
+            text,
+            chunk_size=chunk_size if chunk_size > 0 else None,
+            chunk_overlap=overlap,
+        )
+        raw = [c["content"] for c in chunks]
     else:
         raw = split_by_recursive(text, chunk_size=chunk_size, chunk_overlap=overlap)
     # Deduplicate while preserving order
@@ -377,7 +384,6 @@ def _make_model_key(provider_name: str, model_name: str) -> str:
 
 
 def _embed_with_cache(
-    db: Database,
     emb: Embedder,
     texts: list[str],
     provider_name: str,
@@ -386,36 +392,39 @@ def _embed_with_cache(
     """Embed texts, using cache for hits and only calling API for misses.
 
     Returns np.ndarray of shape (len(texts), dim).
+    Must be called from a sync context (e.g. inside asyncio.to_thread).
     """
+    db = Database()  # fresh connection for thread safety
     model_key = _make_model_key(provider_name, model_name)
     cached = db.get_cached_embeddings(texts, model_key)
 
     # Split into hits and misses
-    miss_indices: list[int] = []
     miss_texts: list[str] = []
-    for i, t in enumerate(texts):
+    for t in texts:
         if cached[t] is None:
-            miss_indices.append(i)
             miss_texts.append(t)
 
     # Fetch misses from API
     if miss_texts:
         new_embs = emb.embed_batch(miss_texts)
         db.put_cached_embeddings(miss_texts, new_embs, model_key)
+        # Update cached dict so reassembly can use it
+        for t in miss_texts:
+            cached[t] = None  # will be filled from new_embs below
     else:
-        new_embs = np.empty((0,), dtype=np.float32)
+        new_embs = np.empty((0, 0), dtype=np.float32)
 
     # Reassemble in original order
-    result = np.empty((len(texts),), dtype=object)  # placeholder
+    result = []
     miss_counter = 0
-    for i, t in enumerate(texts):
+    for t in texts:
         if cached[t] is not None:
-            result[i] = cached[t]
+            result.append(cached[t])
         else:
-            result[i] = new_embs[miss_counter] if new_embs.ndim > 1 else new_embs
+            result.append(new_embs[miss_counter])
             miss_counter += 1
 
-    return np.stack(result.tolist())
+    return np.stack(result)
 
 
 # ---------------------------------------------------------------------------
@@ -457,11 +466,11 @@ async def playground_query(body: QueryRequest):
 
         # Embeddings for visualization — uses cache
         all_embeddings = await asyncio.to_thread(
-            _embed_with_cache, db, emb, chunks, pname, mname
+            _embed_with_cache, emb, chunks, pname, mname
         )
         # Query embedding — also cache (single text)
         query_emb_arr = await asyncio.to_thread(
-            _embed_with_cache, db, emb, [body.query], pname, mname
+            _embed_with_cache, emb, [body.query], pname, mname
         )
         query_emb = query_emb_arr[0]
 
@@ -520,7 +529,7 @@ async def chunk_vs_chunk(body: ChunkVsChunkRequest):
         emb.configure(pname, api_key, mname, base_url)
         # Use cache-aware embedding
         embeddings = await asyncio.to_thread(
-            _embed_with_cache, db, emb, chunks, pname, mname
+            _embed_with_cache, emb, chunks, pname, mname
         )
         metric_fn = get_metric("cosine")
         n = len(chunks)

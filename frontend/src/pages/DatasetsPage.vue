@@ -39,6 +39,7 @@ const strategyOptions = [
   { value: 'recursive', label: 'Recursive', desc: 'Splits on paragraphs → sentences → characters (recommended)' },
   { value: 'fixed',     label: 'Fixed Size', desc: 'Splits every N characters with overlap' },
   { value: 'lines',     label: 'By Lines',   desc: 'One chunk per non-empty line' },
+  { value: 'markdown',  label: 'Markdown',   desc: 'Splits by header hierarchy, then size' },
 ]
 const currentStrategyDesc = computed(() =>
   strategyOptions.find(s => s.value === chunkStrategy.value)?.desc ?? ''
