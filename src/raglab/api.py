@@ -246,9 +246,34 @@ def delete_chunk(dataset_id: int, chunk_id: int):
 
 
 @app.get("/api/datasets/{dataset_id}/chunks")
-def get_chunks(dataset_id: int):
-    rows = _db().get_chunks(dataset_id)
-    return [{"id": r[0], "index": r[2], "content": r[3]} for r in rows]
+def get_chunks(dataset_id: int, page: int = 0, page_size: int = 0):
+    """Return chunks for a dataset.
+
+    If page_size > 0, return paginated results with metadata.
+    If page_size == 0, return all chunks (backward compatible).
+    """
+    db = _db()
+    rows = db.get_chunks(dataset_id)
+    total = len(rows)
+
+    if page_size <= 0:
+        # No pagination — return all
+        return [{"id": r[0], "index": r[2], "content": r[3]} for r in rows]
+
+    # Paginated response
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    end = start + page_size
+    items = [{"id": r[0], "index": r[2], "content": r[3]} for r in rows[start:end]]
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
 
 def _split_text(text: str, strategy: str, chunk_size: int, overlap: int) -> list[str]:
     """Split text using the given strategy and deduplicate by normalized content."""
@@ -328,6 +353,57 @@ def save_config(body: ConfigSave):
 
 
 # ---------------------------------------------------------------------------
+# Embedding cache helper
+# ---------------------------------------------------------------------------
+
+def _make_model_key(provider_name: str, model_name: str) -> str:
+    """Build a stable key for cache lookup: provider/model."""
+    return f"{provider_name}/{model_name}"
+
+
+def _embed_with_cache(
+    db: Database,
+    emb: Embedder,
+    texts: list[str],
+    provider_name: str,
+    model_name: str,
+) -> np.ndarray:
+    """Embed texts, using cache for hits and only calling API for misses.
+
+    Returns np.ndarray of shape (len(texts), dim).
+    """
+    model_key = _make_model_key(provider_name, model_name)
+    cached = db.get_cached_embeddings(texts, model_key)
+
+    # Split into hits and misses
+    miss_indices: list[int] = []
+    miss_texts: list[str] = []
+    for i, t in enumerate(texts):
+        if cached[t] is None:
+            miss_indices.append(i)
+            miss_texts.append(t)
+
+    # Fetch misses from API
+    if miss_texts:
+        new_embs = emb.embed_batch(miss_texts)
+        db.put_cached_embeddings(miss_texts, new_embs, model_key)
+    else:
+        new_embs = np.empty((0,), dtype=np.float32)
+
+    # Reassemble in original order
+    result = np.empty((len(texts),), dtype=object)  # placeholder
+    miss_counter = 0
+    for i, t in enumerate(texts):
+        if cached[t] is not None:
+            result[i] = cached[t]
+        else:
+            result[i] = new_embs[miss_counter] if new_embs.ndim > 1 else new_embs
+            miss_counter += 1
+
+    return np.stack(result.tolist())
+
+
+# ---------------------------------------------------------------------------
 # Playground - Query vs Chunks
 # ---------------------------------------------------------------------------
 
@@ -364,9 +440,15 @@ async def playground_query(body: QueryRequest):
         results = await asyncio.to_thread(dense_score, body.query, chunks, emb, "cosine", body.top_k)
         results = [r for r in results if r["score"] >= body.threshold]
 
-        # Embeddings for visualization
-        all_embeddings = await asyncio.to_thread(emb.embed_batch, chunks)
-        query_emb = await asyncio.to_thread(emb.embed, body.query)
+        # Embeddings for visualization — uses cache
+        all_embeddings = await asyncio.to_thread(
+            _embed_with_cache, db, emb, chunks, pname, mname
+        )
+        # Query embedding — also cache (single text)
+        query_emb_arr = await asyncio.to_thread(
+            _embed_with_cache, db, emb, [body.query], pname, mname
+        )
+        query_emb = query_emb_arr[0]
 
         scores = [r["score"] for r in results]
         tsne_points = None
@@ -421,7 +503,10 @@ async def chunk_vs_chunk(body: ChunkVsChunkRequest):
         _, pname, api_key, base_url, _ = p
         emb = Embedder()
         emb.configure(pname, api_key, mname, base_url)
-        embeddings = await asyncio.to_thread(emb.embed_batch, chunks)
+        # Use cache-aware embedding
+        embeddings = await asyncio.to_thread(
+            _embed_with_cache, db, emb, chunks, pname, mname
+        )
         metric_fn = get_metric("cosine")
         n = len(chunks)
         matrix = [

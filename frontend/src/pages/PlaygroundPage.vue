@@ -30,25 +30,51 @@ function makeHeatmapOption(matrix, labels) {
   if (!matrix?.length) return null
   const n = matrix.length
   const data = []
+  const diagData = []
+  // Compute min/max excluding diagonal for proper color scaling
+  let offMin = 1, offMax = 0
   for (let i = 0; i < n; i++)
-    for (let j = 0; j < n; j++)
-      data.push([j, i, +matrix[i][j].toFixed(3)])
+    for (let j = 0; j < n; j++) {
+      const v = +matrix[i][j].toFixed(3)
+      if (i === j) {
+        diagData.push([j, i, v])
+      } else {
+        data.push([j, i, v])
+        if (v < offMin) offMin = v
+        if (v > offMax) offMax = v
+      }
+    }
+  // Round bounds for cleaner legend
+  const vmMin = Math.floor(offMin * 10) / 10
+  const vmMax = Math.ceil(offMax * 10) / 10
   const shortLabels = labels.map((l, i) => `#${i+1} ${l.slice(0, 18)}${l.length > 18 ? '…' : ''}`)
   return {
     backgroundColor: C.bg,
     tooltip: {
       position: 'top',
-      formatter: p => `${shortLabels[p.data[1]]} × ${shortLabels[p.data[0]]}<br/>Similarity: <b>${p.data[2]}</b>`
+      formatter: p => {
+        const isDiag = p.seriesIndex === 1
+        const val = p.data[2]
+        return `${shortLabels[p.data[1]]} × ${shortLabels[p.data[0]]}<br/>Similarity: <b>${val}</b>${isDiag ? ' (self)' : ''}`
+      }
     },
     grid: { left: 160, right: 80, top: 16, bottom: 120 },
     xAxis: { type: 'category', data: shortLabels, axisLabel: { color: C.text, fontSize: 10, rotate: 30, interval: 0 }, axisLine: { lineStyle: { color: C.grid } }, splitArea: { show: true, areaStyle: { color: [C.bg, C.surface] } } },
     yAxis: { type: 'category', data: shortLabels, axisLabel: { color: C.text, fontSize: 10 }, axisLine: { lineStyle: { color: C.grid } }, splitArea: { show: true, areaStyle: { color: [C.bg, C.surface] } } },
-    visualMap: { min: 0, max: 1, calculable: true, orient: 'vertical', right: 8, top: 'center', textStyle: { color: C.text, fontSize: 10 }, inRange: { color: ['#2a1a1a', '#e8655a', '#e8a855', '#39d98a'] } },
-    series: [{
-      type: 'heatmap', data,
-      label: { show: n <= 12, formatter: p => p.data[2].toFixed(2), fontSize: 9, color: '#fff' },
-      emphasis: { itemStyle: { shadowBlur: 6, shadowColor: 'rgba(0,0,0,0.5)' } }
-    }],
+    visualMap: { min: vmMin, max: vmMax, calculable: true, orient: 'vertical', right: 8, top: 'center', textStyle: { color: C.text, fontSize: 10 }, inRange: { color: ['#2a1a1a', '#e8655a', '#e8a855', '#39d98a'] } },
+    series: [
+      {
+        type: 'heatmap', data,
+        label: { show: n <= 12, formatter: p => p.data[2].toFixed(2), fontSize: 9, color: '#fff' },
+        emphasis: { itemStyle: { shadowBlur: 6, shadowColor: 'rgba(0,0,0,0.5)' } }
+      },
+      {
+        type: 'heatmap', data: diagData,
+        label: { show: n <= 12, formatter: '1.00', fontSize: 9, color: '#555' },
+        itemStyle: { borderColor: '#333', borderWidth: 1, color: '#1a1a1a' },
+        emphasis: { itemStyle: { shadowBlur: 0 } }
+      }
+    ],
   }
 }
 
@@ -198,6 +224,63 @@ async function fetchDatasets() {
   }
 }
 
+// Dataset preview pagination (Query vs Chunks)
+const dsPreviewOpen = ref(false)
+const dsPreviewChunks = ref([])
+const dsPreviewPage = ref(0)
+const dsPreviewTotal = ref(0)
+const dsPreviewTotalPages = ref(0)
+const dsPreviewPageSize = 15
+
+async function toggleDsPreview() {
+  if (dsPreviewOpen.value) {
+    dsPreviewOpen.value = false
+    return
+  }
+  if (!selectedDataset.value) return
+  dsPreviewOpen.value = true
+  dsPreviewPage.value = 0
+  await loadDsPreview(0)
+}
+
+async function loadDsPreview(page) {
+  if (!selectedDataset.value) return
+  dsPreviewPage.value = page
+  try {
+    const res = await fetch(`/api/datasets/${selectedDataset.value}/chunks?page=${page}&page_size=${dsPreviewPageSize}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    if (data.items) {
+      dsPreviewChunks.value = data.items
+      dsPreviewTotal.value = data.total
+      dsPreviewTotalPages.value = data.total_pages
+    } else {
+      dsPreviewChunks.value = Array.isArray(data) ? data : []
+      dsPreviewTotal.value = dsPreviewChunks.value.length
+      dsPreviewTotalPages.value = 1
+    }
+  } catch {
+    dsPreviewChunks.value = []
+  }
+}
+
+function dsPageRange() {
+  const pages = []
+  const cur = dsPreviewPage.value
+  const last = dsPreviewTotalPages.value - 1
+  pages.push(0)
+  for (let i = Math.max(1, cur - 2); i <= Math.min(last - 1, cur + 2); i++) {
+    if (!pages.includes(i)) pages.push(i)
+  }
+  if (last > 0) pages.push(last)
+  const result = []
+  for (let i = 0; i < pages.length; i++) {
+    if (i > 0 && pages[i] - pages[i - 1] > 1) result.push('...')
+    result.push(pages[i])
+  }
+  return result
+}
+
 watch(() => chunksTab.value, (tab) => {
   if (tab === 'dataset' && !datasets.value.length) fetchDatasets()
 })
@@ -257,6 +340,63 @@ const cvcChunks = computed(() => {
   if (!cvcAdhocText.value.trim()) return []
   return cvcAdhocText.value.split(/\n\n+/).map(s => s.trim()).filter(Boolean)
 })
+
+// CVC dataset preview pagination
+const cvcPreviewOpen = ref(false)
+const cvcPreviewChunks = ref([])
+const cvcPreviewPage = ref(0)
+const cvcPreviewTotal = ref(0)
+const cvcPreviewTotalPages = ref(0)
+const cvcPreviewPageSize = 15
+
+async function toggleCvcPreview() {
+  if (cvcPreviewOpen.value) {
+    cvcPreviewOpen.value = false
+    return
+  }
+  if (!cvcDataset.value) return
+  cvcPreviewOpen.value = true
+  cvcPreviewPage.value = 0
+  await loadCvcPreview(0)
+}
+
+async function loadCvcPreview(page) {
+  if (!cvcDataset.value) return
+  cvcPreviewPage.value = page
+  try {
+    const res = await fetch(`/api/datasets/${cvcDataset.value}/chunks?page=${page}&page_size=${cvcPreviewPageSize}`)
+    if (!res.ok) throw new Error(await res.text())
+    const data = await res.json()
+    if (data.items) {
+      cvcPreviewChunks.value = data.items
+      cvcPreviewTotal.value = data.total
+      cvcPreviewTotalPages.value = data.total_pages
+    } else {
+      cvcPreviewChunks.value = Array.isArray(data) ? data : []
+      cvcPreviewTotal.value = cvcPreviewChunks.value.length
+      cvcPreviewTotalPages.value = 1
+    }
+  } catch {
+    cvcPreviewChunks.value = []
+  }
+}
+
+function cvcPageRange() {
+  const pages = []
+  const cur = cvcPreviewPage.value
+  const last = cvcPreviewTotalPages.value - 1
+  pages.push(0)
+  for (let i = Math.max(1, cur - 2); i <= Math.min(last - 1, cur + 2); i++) {
+    if (!pages.includes(i)) pages.push(i)
+  }
+  if (last > 0) pages.push(last)
+  const result = []
+  for (let i = 0; i < pages.length; i++) {
+    if (i > 0 && pages[i] - pages[i - 1] > 1) result.push('...')
+    result.push(pages[i])
+  }
+  return result
+}
 
 watch(() => cvcTab.value, (tab) => {
   if (tab === 'dataset' && !datasets.value.length) fetchDatasets()
@@ -423,10 +563,63 @@ async function runCvc() {
 
         <!-- Dataset tab -->
         <div v-if="chunksTab === 'dataset'" style="flex-shrink:0;margin-bottom:8px;">
-          <select class="rl-select" v-model="selectedDataset">
+          <select class="rl-select" v-model="selectedDataset" @change="dsPreviewOpen = false">
             <option value="">Select a dataset…</option>
             <option v-for="ds in datasets" :key="ds.id" :value="ds.id">{{ ds.name }}</option>
           </select>
+          <div style="margin-top:6px;">
+            <button
+              class="rl-btn-secondary"
+              style="font-size:11px;padding:4px 10px;width:auto;"
+              :disabled="!selectedDataset"
+              @click="toggleDsPreview"
+            >
+              <span class="material-symbols-outlined" style="font-size:14px;">preview</span>
+              {{ dsPreviewOpen ? 'Hide' : 'Preview' }} Chunks
+              <span v-if="dsPreviewOpen && dsPreviewTotal > 0" style="font-family:'JetBrains Mono',monospace;margin-left:4px;">({{ dsPreviewTotal }})</span>
+            </button>
+          </div>
+
+          <!-- Dataset chunks preview with pagination -->
+          <div v-if="dsPreviewOpen && dsPreviewChunks.length" style="margin-top:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-input);max-height:200px;overflow-y:auto;">
+            <div
+              v-for="(chunk, i) in dsPreviewChunks"
+              :key="chunk.id ?? i"
+              style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--on-surface-variant);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+            >
+              <span style="color:var(--on-surface-variant);font-size:10px;">#{{ (chunk.index ?? i) + 1 }}</span>
+              {{ (chunk.content ?? '').slice(0, 80) }}{{ (chunk.content ?? '').length > 80 ? '…' : '' }}
+            </div>
+            <!-- Pagination -->
+            <div v-if="dsPreviewTotalPages > 1" style="display:flex;align-items:center;justify-content:center;gap:3px;padding:6px;border-top:1px solid var(--border);">
+              <button class="rl-btn-icon" :disabled="dsPreviewPage === 0" @click="loadDsPreview(0)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">first_page</span>
+              </button>
+              <button class="rl-btn-icon" :disabled="dsPreviewPage === 0" @click="loadDsPreview(dsPreviewPage - 1)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">chevron_left</span>
+              </button>
+              <template v-for="p in dsPageRange()" :key="'dp'+p">
+                <span v-if="p === '...'" style="color:var(--on-surface-variant);font-size:10px;padding:0 2px;">…</span>
+                <button
+                  v-else
+                  :style="{
+                    background: p === dsPreviewPage ? 'var(--primary)' : 'transparent',
+                    color: p === dsPreviewPage ? 'var(--on-primary)' : 'var(--on-surface-variant)',
+                    border: '1px solid ' + (p === dsPreviewPage ? 'var(--primary)' : 'var(--border)'),
+                    borderRadius: '4px', padding: '1px 6px', fontSize: '10px',
+                    fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer', minWidth: '22px',
+                  }"
+                  @click="loadDsPreview(p)"
+                >{{ p + 1 }}</button>
+              </template>
+              <button class="rl-btn-icon" :disabled="dsPreviewPage >= dsPreviewTotalPages - 1" @click="loadDsPreview(dsPreviewPage + 1)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">chevron_right</span>
+              </button>
+              <button class="rl-btn-icon" :disabled="dsPreviewPage >= dsPreviewTotalPages - 1" @click="loadDsPreview(dsPreviewTotalPages - 1)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">last_page</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Results list -->
@@ -571,10 +764,60 @@ async function runCvc() {
         </div>
 
         <div v-if="cvcTab === 'dataset'" style="flex-shrink:0;">
-          <select class="rl-select" v-model="cvcDataset">
+          <select class="rl-select" v-model="cvcDataset" @change="cvcPreviewOpen = false">
             <option value="">Select a dataset…</option>
             <option v-for="ds in datasets" :key="ds.id" :value="ds.id">{{ ds.name }}</option>
           </select>
+          <div style="margin-top:6px;">
+            <button
+              class="rl-btn-secondary"
+              style="font-size:11px;padding:4px 10px;width:auto;"
+              :disabled="!cvcDataset"
+              @click="toggleCvcPreview"
+            >
+              <span class="material-symbols-outlined" style="font-size:14px;">preview</span>
+              {{ cvcPreviewOpen ? 'Hide' : 'Preview' }} Chunks
+              <span v-if="cvcPreviewOpen && cvcPreviewTotal > 0" style="font-family:'JetBrains Mono',monospace;margin-left:4px;">({{ cvcPreviewTotal }})</span>
+            </button>
+          </div>
+          <div v-if="cvcPreviewOpen && cvcPreviewChunks.length" style="margin-top:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-input);max-height:200px;overflow-y:auto;">
+            <div
+              v-for="(chunk, i) in cvcPreviewChunks"
+              :key="chunk.id ?? i"
+              style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--on-surface-variant);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+            >
+              <span style="color:var(--on-surface-variant);font-size:10px;">#{{ (chunk.index ?? i) + 1 }}</span>
+              {{ (chunk.content ?? '').slice(0, 80) }}{{ (chunk.content ?? '').length > 80 ? '…' : '' }}
+            </div>
+            <div v-if="cvcPreviewTotalPages > 1" style="display:flex;align-items:center;justify-content:center;gap:3px;padding:6px;border-top:1px solid var(--border);">
+              <button class="rl-btn-icon" :disabled="cvcPreviewPage === 0" @click="loadCvcPreview(0)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">first_page</span>
+              </button>
+              <button class="rl-btn-icon" :disabled="cvcPreviewPage === 0" @click="loadCvcPreview(cvcPreviewPage - 1)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">chevron_left</span>
+              </button>
+              <template v-for="p in cvcPageRange()" :key="'cvp'+p">
+                <span v-if="p === '...'" style="color:var(--on-surface-variant);font-size:10px;padding:0 2px;">…</span>
+                <button
+                  v-else
+                  :style="{
+                    background: p === cvcPreviewPage ? 'var(--primary)' : 'transparent',
+                    color: p === cvcPreviewPage ? 'var(--on-primary)' : 'var(--on-surface-variant)',
+                    border: '1px solid ' + (p === cvcPreviewPage ? 'var(--primary)' : 'var(--border)'),
+                    borderRadius: '4px', padding: '1px 6px', fontSize: '10px',
+                    fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer', minWidth: '22px',
+                  }"
+                  @click="loadCvcPreview(p)"
+                >{{ p + 1 }}</button>
+              </template>
+              <button class="rl-btn-icon" :disabled="cvcPreviewPage >= cvcPreviewTotalPages - 1" @click="loadCvcPreview(cvcPreviewPage + 1)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">chevron_right</span>
+              </button>
+              <button class="rl-btn-icon" :disabled="cvcPreviewPage >= cvcPreviewTotalPages - 1" @click="loadCvcPreview(cvcPreviewTotalPages - 1)" style="padding:2px;">
+                <span class="material-symbols-outlined" style="font-size:14px;">last_page</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

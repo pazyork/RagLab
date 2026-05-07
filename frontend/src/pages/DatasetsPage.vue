@@ -27,6 +27,12 @@ const chunkOverlap = ref(64)
 const applyingChunks = ref(false)
 const previewChunks = ref([])
 
+// Pagination for saved chunks
+const chunkPage = ref(0)
+const chunkPageSize = ref(20)
+const chunkTotal = ref(0)
+const chunkTotalPages = ref(0)
+
 // Strategy metadata
 const strategyOptions = [
   { value: 'recursive', label: 'Recursive', desc: 'Splits on paragraphs → sentences → characters (recommended)' },
@@ -171,19 +177,60 @@ function selectSource(ds) {
   selectedSource.value = ds
   rawText.value = ''
   rawTextLabel.value = ''
+  chunkPage.value = 0
   previewChunks.value = []
   loadPreview(ds)
 }
 
-async function loadPreview(ds) {
+async function loadPreview(ds, page = 0) {
+  if (!ds) return
+  chunkPage.value = page
   try {
-    const res = await fetch(`/api/datasets/${ds.id}/chunks`)
+    const res = await fetch(`/api/datasets/${ds.id}/chunks?page=${page}&page_size=${chunkPageSize.value}`)
     if (!res.ok) throw new Error(await res.text())
     const data = await res.json()
-    previewChunks.value = Array.isArray(data) ? data : (data.chunks ?? [])
+    if (data.items) {
+      // Paginated response
+      previewChunks.value = data.items
+      chunkTotal.value = data.total
+      chunkTotalPages.value = data.total_pages
+    } else {
+      // Unpaginated fallback
+      previewChunks.value = Array.isArray(data) ? data : []
+      chunkTotal.value = previewChunks.value.length
+      chunkTotalPages.value = 1
+    }
   } catch {
     previewChunks.value = []
+    chunkTotal.value = 0
+    chunkTotalPages.value = 0
   }
+}
+
+function goToChunkPage(p) {
+  if (p < 0 || p >= chunkTotalPages.value) return
+  loadPreview(selectedSource.value, p)
+}
+
+function chunkPageRange() {
+  const pages = []
+  const cur = chunkPage.value
+  const last = chunkTotalPages.value - 1
+  // Always show first page
+  pages.push(0)
+  // Show pages around current
+  for (let i = Math.max(1, cur - 2); i <= Math.min(last - 1, cur + 2); i++) {
+    if (!pages.includes(i)) pages.push(i)
+  }
+  // Always show last page
+  if (last > 0) pages.push(last)
+  // Insert ellipsis markers
+  const result = []
+  for (let i = 0; i < pages.length; i++) {
+    if (i > 0 && pages[i] - pages[i - 1] > 1) result.push('...')
+    result.push(pages[i])
+  }
+  return result
 }
 
 // File upload — read file locally, store as rawText
@@ -474,10 +521,12 @@ onMounted(fetchDatasets)
               Chunking Preview
               <span v-if="previewLoading" style="font-size:11px;color:var(--on-surface-variant);font-weight:400;">computing…</span>
               <span v-else-if="previewCount !== null" style="font-size:11px;color:var(--on-surface-variant);font-weight:400;">
-                first {{ previewChunks.length }} of {{ previewCount }} chunks
+                {{ previewChunks.length }} of {{ previewCount }} chunks
                 <span v-if="rawText" style="color:var(--primary);margin-left:4px;">· preview only</span>
               </span>
-              <span v-else style="font-size:12px;color:var(--on-surface-variant);font-weight:400;">(first 20 chunks)</span>
+              <span v-else-if="chunkTotal > 0" style="font-size:11px;color:var(--on-surface-variant);font-weight:400;">
+                <span class="rl-num">{{ chunkTotal }}</span> chunks total · page {{ chunkPage + 1 }}/{{ chunkTotalPages }}
+              </span>
             </div>
 
             <div v-if="!previewChunks.length" style="color:var(--on-surface-variant);font-size:12px;">
@@ -511,6 +560,74 @@ onMounted(fetchDatasets)
                 >
                   <span class="material-symbols-outlined" style="font-size:14px;">close</span>
                 </button>
+              </div>
+
+              <!-- Pagination controls -->
+              <div v-if="chunkTotalPages > 1 && !rawText" style="display:flex;align-items:center;justify-content:center;gap:4px;padding-top:12px;border-top:1px solid var(--border);">
+                <button
+                  class="rl-btn-icon"
+                  :disabled="chunkPage === 0"
+                  @click="goToChunkPage(0)"
+                  title="First page"
+                >
+                  <span class="material-symbols-outlined" style="font-size:16px;">first_page</span>
+                </button>
+                <button
+                  class="rl-btn-icon"
+                  :disabled="chunkPage === 0"
+                  @click="goToChunkPage(chunkPage - 1)"
+                  title="Previous page"
+                >
+                  <span class="material-symbols-outlined" style="font-size:16px;">chevron_left</span>
+                </button>
+
+                <template v-for="p in chunkPageRange()" :key="'cp'+p">
+                  <span v-if="p === '...'" style="color:var(--on-surface-variant);font-size:12px;padding:0 4px;">…</span>
+                  <button
+                    v-else
+                    :style="{
+                      background: p === chunkPage ? 'var(--primary)' : 'transparent',
+                      color: p === chunkPage ? 'var(--on-primary)' : 'var(--on-surface-variant)',
+                      border: '1px solid ' + (p === chunkPage ? 'var(--primary)' : 'var(--border)'),
+                      borderRadius: '6px', padding: '2px 8px', fontSize: '12px',
+                      fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer', minWidth: '28px',
+                    }"
+                    @click="goToChunkPage(p)"
+                  >
+                    {{ p + 1 }}
+                  </button>
+                </template>
+
+                <button
+                  class="rl-btn-icon"
+                  :disabled="chunkPage >= chunkTotalPages - 1"
+                  @click="goToChunkPage(chunkPage + 1)"
+                  title="Next page"
+                >
+                  <span class="material-symbols-outlined" style="font-size:16px;">chevron_right</span>
+                </button>
+                <button
+                  class="rl-btn-icon"
+                  :disabled="chunkPage >= chunkTotalPages - 1"
+                  @click="goToChunkPage(chunkTotalPages - 1)"
+                  title="Last page"
+                >
+                  <span class="material-symbols-outlined" style="font-size:16px;">last_page</span>
+                </button>
+
+                <!-- Jump to page -->
+                <div style="display:flex;align-items:center;gap:4px;margin-left:12px;">
+                  <span style="font-size:11px;color:var(--on-surface-variant);">Go to</span>
+                  <input
+                    class="rl-input"
+                    type="number"
+                    min="1"
+                    :max="chunkTotalPages"
+                    :value="chunkPage + 1"
+                    @keydown.enter="goToChunkPage(+$event.target.value - 1)"
+                    style="width:48px;padding:2px 6px;font-size:11px;text-align:center;"
+                  />
+                </div>
               </div>
             </div>
           </div>

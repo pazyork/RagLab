@@ -2,6 +2,8 @@ import sqlite3
 import os
 from typing import List, Tuple, Optional, Dict, Union
 
+import numpy as np
+
 
 class Database:
     def __init__(self, path: Optional[str] = None):
@@ -103,6 +105,20 @@ class Database:
             value TEXT NOT NULL
         )
         ''')
+
+        # embedding_cache table — cache embeddings by (content_hash, model_key)
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS embedding_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content_hash TEXT NOT NULL,
+            model_key TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            dim INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(content_hash, model_key)
+        )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_emb_cache_lookup ON embedding_cache(content_hash, model_key)')
 
         self.conn.commit()
 
@@ -333,3 +349,64 @@ class Database:
             config[key] = value
 
         return config
+
+    # ── Embedding Cache ────────────────────────────────────────────────────
+    import hashlib as _hashlib
+
+    @staticmethod
+    def _make_cache_key(content: str, model_key: str) -> str:
+        """Hash content + model_key into a short hex digest."""
+        import hashlib
+        return hashlib.sha256(f"{model_key}::{content}".encode()).hexdigest()
+
+    def get_cached_embeddings(self, contents: List[str], model_key: str) -> Dict[str, Optional[np.ndarray]]:
+        """Look up cached embeddings for a list of texts.
+
+        Returns:
+            dict mapping content → np.ndarray (or None if not cached)
+        """
+        cursor = self.conn.cursor()
+        result: Dict[str, Optional[np.ndarray]] = {}
+        for content in contents:
+            h = self._make_cache_key(content, model_key)
+            cursor.execute(
+                "SELECT embedding, dim FROM embedding_cache WHERE content_hash = ? AND model_key = ?",
+                (h, model_key)
+            )
+            row = cursor.fetchone()
+            if row:
+                blob, dim = row
+                result[content] = np.frombuffer(blob, dtype=np.float32).copy()
+            else:
+                result[content] = None
+        return result
+
+    def put_cached_embeddings(self, contents: List[str], embeddings: np.ndarray, model_key: str) -> None:
+        """Store embeddings in cache. embeddings must align with contents."""
+        cursor = self.conn.cursor()
+        for i, content in enumerate(contents):
+            h = self._make_cache_key(content, model_key)
+            vec = embeddings[i] if embeddings.ndim > 1 else embeddings
+            blob = vec.astype(np.float32).tobytes()
+            dim = len(vec)
+            cursor.execute(
+                "INSERT OR REPLACE INTO embedding_cache (content_hash, model_key, embedding, dim) VALUES (?, ?, ?, ?)",
+                (h, model_key, blob, dim)
+            )
+        self.conn.commit()
+
+    def get_cache_stats(self) -> Dict:
+        """Return cache statistics."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*), COALESCE(SUM(dim), 0) FROM embedding_cache")
+        count, total_dim = cursor.fetchone()
+        return {"entries": count, "total_dim": total_dim}
+
+    def clear_cache(self) -> int:
+        """Clear all cached embeddings. Returns number of entries deleted."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM embedding_cache")
+        count = cursor.fetchone()[0]
+        cursor.execute("DELETE FROM embedding_cache")
+        self.conn.commit()
+        return count
