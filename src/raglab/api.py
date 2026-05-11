@@ -725,12 +725,19 @@ def _compute_projection_points(
         has_query = query_emb is not None
         vecs = np.vstack([embeddings, query_emb.reshape(1, -1)]) if has_query else embeddings
 
+        coords = None
         if projection == "umap":
-            from umap import UMAP
-            n_neighbors = min(15, max(2, n - 1))
-            reducer = UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42, metric="cosine")
-            coords = reducer.fit_transform(vecs)
-        else:
+            try:
+                from umap import UMAP
+                n_neighbors = min(15, max(2, n - 1))
+                reducer = UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42, metric="cosine")
+                coords = reducer.fit_transform(vecs)
+            except ImportError:
+                logger.warning("umap-learn not installed, falling back to t-SNE. Install with: pip install umap-learn")
+            except Exception as e:
+                logger.warning(f"UMAP projection failed ({e}), falling back to t-SNE")
+
+        if coords is None:
             from sklearn.manifold import TSNE
             perplexity = min(30, max(2, n - 1))
             tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=300)
@@ -753,7 +760,8 @@ def _compute_projection_points(
                     "cluster": labels[i],
                 })
         return points
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Projection computation failed: {e}")
         return None
 
 
