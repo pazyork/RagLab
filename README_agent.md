@@ -2,7 +2,7 @@
 
 RAGLab is a local embedding model evaluation tool. It exposes a REST API and a CLI. Use this document to integrate, automate, or reason about it programmatically.
 
-**Human docs**: [English](README_en.md) · [中文](README.md)
+**Human docs**: [English](README.md) · [中文](README_zh.md)
 
 ---
 

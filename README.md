@@ -1,111 +1,107 @@
 # RAGLab
 
-在选 Embedding 模型之前，你需要在自己的数据上测一测。RAGLab 就是干这个的——本地运行，数据不出机器，装完一行命令启动。
+Before committing to an embedding model, you need to test it on your own data. RAGLab does that — runs locally, data stays on your machine, one command to start.
 
-**[English](README_en.md)** · **[Agent Reference](README_agent.md)**
+**[中文](README_zh.md)** · **[Agent Reference](README_agent.md)**
 
 ---
 
-## 长这样
+## What it looks like
 
-**Settings** — 配置供应商和模型（支持 OpenAI、百炼、OpenRouter 等任何兼容 OpenAI 接口的服务）
+**Settings** — configure providers and models (any OpenAI-compatible endpoint works)
 
 ![Settings](docs/screenshots/settings.png)
 
-**Datasets** — 管理测试文本，上传文件或直接粘贴内容
+**Datasets** — manage your test corpus, upload files or paste text directly
 
 ![Datasets](docs/screenshots/datasets.png)
 
-**Playground** — 跑 Query，检索结果按相似度排序，右侧实时显示分布直方图和 t-SNE/UMAP 语义分簇图
+**Playground** — run queries, ranked results with similarity scores, live distribution histogram and t-SNE/UMAP semantic cluster view
 
 ![Playground](docs/screenshots/playground_tsne.png)
 
-**Chunk vs Chunk** — 全量 chunk 两两相似度热力图，快速发现冗余和语义结构
+**Chunk vs Chunk** — full pairwise similarity heatmap across your corpus, spot redundant or tightly clustered chunks at a glance
 
 ![Heatmap](docs/screenshots/heatmap.png)
 
 ---
 
-## 装
+## Install
 
-需要 Python 3.10+。
+Requires Python 3.10+.
 
 ```bash
 pip install raglab
 raglab serve
 ```
 
-打开 http://localhost:8099 就行了。
-
-数据存在 `~/.raglab.db`，SQLite，重启不丢。如需 UMAP 投影功能，额外安装：`pip install umap-learn`。
+Open http://localhost:8099. Data persists in `~/.raglab.db` between sessions. For UMAP projection: `pip install umap-learn`.
 
 ---
 
-## 用
+## Getting started
 
-**第一步：配供应商**
+**1. Add a provider**
 
-进 Settings，填 API Key 和 Base URL。只要是 OpenAI 兼容接口都能用。比如 OpenRouter 的 Base URL 是 `https://openrouter.ai/api/v1`。
+Go to Settings, enter your API Key and Base URL. Any OpenAI-compatible endpoint works — OpenRouter, Alibaba Bailian, OpenAI, or a self-hosted service. OpenRouter's base URL is `https://openrouter.ai/api/v1` if you want to test a wide range of models quickly.
 
-**第二步：加模型**
+**2. Add models**
 
-同一个供应商可以加多个模型，Settings 里点 Add Model。加完可以点 Test 验证一下能不能通。
+One provider can have multiple models. Click Add Model in Settings, enter the model name as the provider expects it (e.g. `baai/bge-m3`). Hit Test to verify it responds.
 
-**第三步：准备数据集**
+**3. Prepare a dataset**
 
-去 Datasets，创建一个数据集，把你的文档粘进去或者上传文件。文档会按配置的 chunk size 自动切块。
+In Datasets, create a dataset and paste or upload your documents. They get chunked automatically using the chunk size you configure in Settings.
 
-**第四步：在 Playground 跑评测**
+**4. Run evaluations in Playground**
 
-- **Query vs Chunks**：输入一个 query，选模型和检索策略（Dense / BM25 / Hybrid），看哪些 chunk 被检索出来、排名怎么样。右边有相似度分布图和 UMAP 投影。
-- **Chunk vs Chunk**：选一个数据集，生成所有 chunk 的相似度矩阵热力图，看 chunk 之间的语义关系。
+- **Query vs Chunks**: type a query, pick a model and retrieval strategy (Dense / BM25 / Hybrid). You get ranked results, a similarity distribution histogram, and a UMAP/t-SNE projection of the chunk space.
+- **Chunk vs Chunk**: pick a dataset, get a full pairwise similarity heatmap. Useful for spotting redundant chunks or understanding how semantically clustered your corpus is.
 
 ---
 
 ## CLI
 
-不想开 Web UI 也行，直接命令行用：
+Everything the UI does is also available from the command line:
 
 ```bash
-# 配置供应商
+# Provider setup
 raglab provider add openrouter --api-key sk-xxx --base-url https://openrouter.ai/api/v1
 raglab provider list
 
-# 看模型列表、测模型
+# Models
 raglab model list
 raglab model test --model baai/bge-m3
 
-# 切块
+# Chunking
 raglab split doc.txt --strategy recursive --chunk-size 512
 
-# 打分（单模型）
-raglab score "什么是 RAG" chunks.txt --model baai/bge-m3
+# Scoring
+raglab score "what is RAG" chunks.txt --model baai/bge-m3
+raglab compare "what is RAG" chunks.txt --models baai/bge-m3,qwen/qwen3-embedding-8b
 
-# 多模型对比
-raglab compare "什么是 RAG" chunks.txt --models baai/bge-m3,qwen/qwen3-embedding-8b
-
-# 相似度矩阵
+# Similarity matrix
 raglab matrix chunks.txt --model baai/bge-m3
 
-# 管理测试用例
+# Test cases
 raglab case add mytest chunks.txt
 raglab case run mytest
 ```
 
 ---
 
-## 支持的检索策略
+## Retrieval strategies
 
-| 策略 | 说明 |
-|------|------|
-| Dense | 向量相似度，需要 Embedding 模型 |
-| BM25 | 基于词频的稀疏检索，不需要模型 |
-| Hybrid | 两者结合，加权融合 |
+| Strategy | Notes |
+|----------|-------|
+| Dense | Vector similarity, requires an embedding model |
+| BM25 | Sparse term-frequency retrieval, no model needed |
+| Hybrid | Weighted combination of both |
 
-相似度度量支持：Cosine、Dot Product、Euclidean、Manhattan。
+Similarity metrics: Cosine, Dot Product, Euclidean, Manhattan.
 
 ---
 
-## 数据和隐私
+## Data and privacy
 
-所有数据（包括 API Key）存在本地 `~/.raglab.db`，不上传到任何地方。API Key 明文存储，注意文件权限。
+Everything — including API keys — is stored locally in `~/.raglab.db`. Nothing is sent anywhere except the embedding API calls you explicitly configure. API keys are stored in plaintext; make sure your home directory has appropriate permissions.
