@@ -90,6 +90,39 @@ class Embedder:
                 model_full_name = self.model
             logger.debug(f"OpenRouter mode: model_full_name={model_full_name}")
 
+        # OpenRouter embedding: litellm does not route openrouter/ prefix for
+        # embeddings, so we call the raw API directly when base_url points to
+        # OpenRouter.
+        is_openrouter = base_url and "openrouter.ai" in base_url
+
+        if is_openrouter:
+            import requests
+            base_url = base_url.rstrip("/")
+            try:
+                resp = requests.post(
+                    f"{base_url}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {provider_config['api_key']}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "input": text
+                    },
+                    timeout=30
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                embeddings = [item["embedding"] for item in result["data"]]
+                logger.info(f"OpenRouter raw API call succeeded, got {len(embeddings)} embeddings")
+                if isinstance(text, str):
+                    return np.array(embeddings[0], dtype=np.float32)
+                else:
+                    return np.array(embeddings, dtype=np.float32)
+            except Exception as raw_e:
+                logger.error(f"OpenRouter raw API call failed: {raw_e}")
+                raise RuntimeError(f"OpenRouter API call failed: {str(raw_e)}") from raw_e
+
         try:
             response = litellm.embedding(
                 model=model_full_name,

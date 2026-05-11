@@ -4,3 +4,15 @@ __pycache__/
 dist/
 *.db
 .pytest_cache/
+.venv/
+.DS_Store
+_temp/
+frontend/e2e-test.js
+frontend/e2e-test.mjs
+.env
+.env.*
+docs/superpowers/
+run_simple.py
+test_conflict.py
+test_import.py
+test_table.py

@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, shallowRef } from 'vue'
+import { ref, computed, provide } from 'vue'
 import PlaygroundPage from './pages/PlaygroundPage.vue'
 import DatasetsPage from './pages/DatasetsPage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
 import AnimatedBg from './components/AnimatedBg.vue'
+import en from './i18n/en.js'
+import zh from './i18n/zh.js'
 
 const page = ref('playground')
 const view = ref('query_vs_chunks')
@@ -20,6 +22,15 @@ const currentPage = computed(() => pages[page.value])
 function toggleLang() {
   lang.value = lang.value === 'EN' ? '中文' : 'EN'
 }
+
+function t(key, ...args) {
+  const dict = lang.value === 'EN' ? en : zh
+  const val = dict[key] ?? key
+  return typeof val === 'function' ? val(...args) : val
+}
+
+provide('t', t)
+provide('lang', lang)
 </script>
 
 <template>
@@ -38,7 +49,7 @@ function toggleLang() {
             @click="view = 'query_vs_chunks'"
           >
             <span class="material-symbols-outlined" style="font-size:16px;">search</span>
-            Query vs Chunks
+            {{ t('app.query_vs_chunks') }}
           </button>
           <button
             class="rl-view-btn"
@@ -46,7 +57,7 @@ function toggleLang() {
             @click="view = 'chunk_vs_chunk'"
           >
             <span class="material-symbols-outlined" style="font-size:16px;">grid_view</span>
-            Chunk vs Chunk
+            {{ t('app.chunk_vs_chunk') }}
           </button>
         </div>
       </div>

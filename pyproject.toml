@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "raglab"
 version = "0.1.0"
 authors = [
-  { name="Your Name", email="your.email@example.com" }
+  { name="pazyorkcc", email="pazyorkcc@gmail.com" }
 ]
 description = "Embedding model evaluation and selection tool"
 requires-python = ">=3.10"

@@ -67,9 +67,16 @@ class Database:
             case_id INTEGER NOT NULL,
             chunk_index INTEGER NOT NULL,
             content TEXT NOT NULL,
+            source_name TEXT,
             FOREIGN KEY (case_id) REFERENCES test_cases(id) ON DELETE CASCADE
         )
         ''')
+        # Migration: add source_name if table already exists without it
+        try:
+            cursor.execute("ALTER TABLE case_chunks ADD COLUMN source_name TEXT")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
         # eval_runs table
         cursor.execute('''
@@ -220,24 +227,61 @@ class Database:
         self.conn.commit()
 
     # Chunks methods
-    def add_chunks(self, case_id: int, chunks: List[str]):
-        """Add multiple chunks for a test case."""
+    def add_chunks(self, case_id: int, chunks: List[str], source_name: Optional[str] = None):
+        """Add multiple chunks for a test case, appending to existing chunks."""
         cursor = self.conn.cursor()
-        for index, content in enumerate(chunks):
+        # Compute next chunk_index to avoid collisions
+        cursor.execute(
+            "SELECT COALESCE(MAX(chunk_index), -1) FROM case_chunks WHERE case_id = ?",
+            (case_id,)
+        )
+        next_index = cursor.fetchone()[0] + 1
+        for idx, content in enumerate(chunks):
             cursor.execute(
-                "INSERT INTO case_chunks (case_id, chunk_index, content) VALUES (?, ?, ?)",
-                (case_id, index, content)
+                "INSERT INTO case_chunks (case_id, chunk_index, content, source_name) VALUES (?, ?, ?, ?)",
+                (case_id, next_index + idx, content, source_name)
             )
         self.conn.commit()
 
     def get_chunks(self, case_id: int) -> List[Tuple]:
-        """Get all chunks for a test case, ordered by chunk_index."""
+        """Get all chunks for a test case, ordered by insertion order (id)."""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT * FROM case_chunks WHERE case_id = ? ORDER BY chunk_index ASC",
+            "SELECT * FROM case_chunks WHERE case_id = ? ORDER BY id ASC",
             (case_id,)
         )
         return cursor.fetchall()
+
+    def get_sources(self, case_id: int) -> List[Tuple[str, int]]:
+        """Get list of unique source names and their chunk counts for a case."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT COALESCE(source_name, 'unknown'), COUNT(*) as cnt
+            FROM case_chunks
+            WHERE case_id = ?
+            GROUP BY source_name
+            ORDER BY MIN(id) ASC
+            """,
+            (case_id,)
+        )
+        return cursor.fetchall()
+
+    def delete_source_chunks(self, case_id: int, source_name: str) -> int:
+        """Delete all chunks from a specific source for a case. Returns number deleted."""
+        cursor = self.conn.cursor()
+        if source_name == 'unknown':
+            cursor.execute(
+                "DELETE FROM case_chunks WHERE case_id = ? AND source_name IS NULL",
+                (case_id,)
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM case_chunks WHERE case_id = ? AND source_name = ?",
+                (case_id, source_name)
+            )
+        self.conn.commit()
+        return cursor.rowcount
 
     # Eval Runs methods
     def add_run(self, case_id: int, name: str, model: str, metric: str = 'cosine', algorithm: Optional[str] = None) -> int:

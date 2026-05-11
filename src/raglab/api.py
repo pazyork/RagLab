@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 from raglab.storage.db import Database
 from raglab.core.embedder import Embedder
-from raglab.core.scorer import dense_score, sparse_score
+from raglab.core.scorer import dense_score, sparse_score, hybrid_score
 from raglab.core.metrics import get_metric
 from raglab.core.splitter import split_by_recursive, split_by_char, split_lines, split_by_markdown
 
@@ -58,7 +58,8 @@ class ProviderCreate(BaseModel):
 
 
 class ModelCreate(BaseModel):
-    provider_id: int
+    provider_id: Optional[int] = None
+    provider_name: Optional[str] = None
     model_name: str
     model_type: str = "embedding"
 
@@ -72,6 +73,7 @@ class ChunkTextInput(BaseModel):
     strategy: str = "recursive"
     chunk_size: int = 512
     overlap: int = 50
+    source_name: Optional[str] = None
 
 
 class QueryRequest(BaseModel):
@@ -82,6 +84,10 @@ class QueryRequest(BaseModel):
     model_id: Optional[int] = None
     top_k: int = 10
     threshold: float = 0.0
+    metric: str = "cosine"
+    hybrid_weight: float = 0.5  # weight for dense vs bm25 (0=all bm25, 1=all dense)
+    projection: str = "tsne"   # "tsne" or "umap"
+    n_clusters: int = 0        # 0 = auto, else fixed cluster count
 
 
 class ChunkVsChunkRequest(BaseModel):
@@ -90,6 +96,10 @@ class ChunkVsChunkRequest(BaseModel):
     strategy: str = "dense"
     model_id: Optional[int] = None
     max_n: int = 30
+    metric: str = "cosine"
+    hybrid_weight: float = 0.5
+    projection: str = "tsne"
+    n_clusters: int = 0
 
 
 class ConfigSave(BaseModel):
@@ -153,8 +163,18 @@ def list_models():
 
 @app.post("/api/models", status_code=201)
 def create_model(body: ModelCreate):
+    db = _db()
+    # Resolve provider_id from provider_name if needed
+    provider_id = body.provider_id
+    if provider_id is None and body.provider_name:
+        provider = db.get_provider(body.provider_name)
+        if not provider:
+            raise HTTPException(400, f"Provider '{body.provider_name}' not found")
+        provider_id = provider[0]
+    if provider_id is None:
+        raise HTTPException(400, "Either provider_id or provider_name is required")
     try:
-        mid = _db().add_model(body.provider_id, body.model_name, body.model_type)
+        mid = db.add_model(provider_id, body.model_name, body.model_type)
         return {"id": mid, "model_name": body.model_name}
     except Exception as e:
         raise HTTPException(400, str(e))
@@ -211,6 +231,7 @@ def list_openrouter_models():
                 "name": m.get("name", m["id"]),
                 "context_length": m.get("context_length"),
                 "pricing": m.get("pricing", {}).get("prompt", "0"),
+                "created": m.get("created"),
             }
             for m in models
         ]
@@ -284,14 +305,14 @@ def get_chunks(dataset_id: int, page: int = 0, page_size: int = 0):
 
     if page_size <= 0:
         # No pagination — return all
-        return [{"id": r[0], "index": r[2], "content": r[3]} for r in rows]
+        return [{"id": r[0], "index": r[2], "content": r[3], "source_name": r[4]} for r in rows]
 
     # Paginated response
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = max(0, min(page, total_pages - 1))
     start = page * page_size
     end = start + page_size
-    items = [{"id": r[0], "index": r[2], "content": r[3]} for r in rows[start:end]]
+    items = [{"id": r[0], "index": r[2], "content": r[3], "source_name": r[4]} for r in rows[start:end]]
 
     return {
         "items": items,
@@ -300,6 +321,23 @@ def get_chunks(dataset_id: int, page: int = 0, page_size: int = 0):
         "page_size": page_size,
         "total_pages": total_pages,
     }
+
+
+@app.get("/api/datasets/{dataset_id}/sources")
+def get_sources(dataset_id: int):
+    """Return list of unique source names and chunk counts for a dataset."""
+    db = _db()
+    rows = db.get_sources(dataset_id)
+    return [{"name": r[0], "chunk_count": r[1]} for r in rows]
+
+
+@app.delete("/api/datasets/{dataset_id}/sources/{source_name}")
+def delete_source(dataset_id: int, source_name: str):
+    """Delete all chunks from a specific source for a dataset."""
+    db = _db()
+    deleted = db.delete_source_chunks(dataset_id, source_name)
+    return {"ok": True, "deleted": deleted}
+
 
 def _split_text(text: str, strategy: str, chunk_size: int, overlap: int) -> list[str]:
     """Split text using the given strategy and deduplicate by normalized content."""
@@ -339,24 +377,18 @@ def preview_chunks(body: ChunkTextInput):
 @app.post("/api/datasets/{dataset_id}/chunks")
 def set_chunks(dataset_id: int, body: ChunkTextInput):
     db = _db()
-    cursor = db.conn.cursor()
-    cursor.execute("DELETE FROM case_chunks WHERE case_id = ?", (dataset_id,))
-    db.conn.commit()
-
+    source = body.source_name or 'pasted text'
     chunks = _split_text(body.text, body.strategy, body.chunk_size, body.overlap)
-    db.add_chunks(dataset_id, chunks)
-    return {"chunk_count": len(chunks), "chunks": chunks[:5]}
+    db.add_chunks(dataset_id, chunks, source_name=source)
+    return {"chunk_count": len(chunks), "chunks": chunks[:5], "source_name": source}
 
 
 @app.post("/api/datasets/{dataset_id}/upload")
 async def upload_file(dataset_id: int, file: UploadFile = File(...)):
     content = (await file.read()).decode("utf-8")
     db = _db()
-    cursor = db.conn.cursor()
-    cursor.execute("DELETE FROM case_chunks WHERE case_id = ?", (dataset_id,))
-    db.conn.commit()
     chunks = split_by_recursive(content, chunk_size=512, chunk_overlap=50)
-    db.add_chunks(dataset_id, chunks)
+    db.add_chunks(dataset_id, chunks, source_name=file.filename)
     return {"chunk_count": len(chunks), "filename": file.filename}
 
 
@@ -470,9 +502,9 @@ async def playground_query(body: QueryRequest):
     if not chunks:
         raise HTTPException(400, "No chunks provided")
 
-    if body.strategy == "dense":
+    if body.strategy in ("dense", "hybrid"):
         if not body.model_id:
-            raise HTTPException(400, "model_id required for dense strategy")
+            raise HTTPException(400, "model_id required for dense/hybrid strategy")
         db = _db()
         models = db.list_models()
         providers = {p[0]: p for p in db.list_providers()}
@@ -487,7 +519,12 @@ async def playground_query(body: QueryRequest):
         emb = Embedder()
         emb.configure(pname, api_key, mname, base_url)
 
-        results = await asyncio.to_thread(dense_score, body.query, chunks, emb, "cosine", body.top_k)
+        if body.strategy == "hybrid":
+            results = await asyncio.to_thread(
+                hybrid_score, body.query, chunks, emb, body.metric, body.top_k, body.hybrid_weight
+            )
+        else:
+            results = await asyncio.to_thread(dense_score, body.query, chunks, emb, body.metric, body.top_k)
         results = [r for r in results if r["score"] >= body.threshold]
 
         # Embeddings for visualization — uses cache
@@ -501,16 +538,21 @@ async def playground_query(body: QueryRequest):
         query_emb = query_emb_arr[0]
 
         scores = [r["score"] for r in results]
-        tsne_points = None
+        proj_points = None
         if len(all_embeddings) >= 3:
-            tsne_points = await asyncio.to_thread(
-                _compute_tsne_points, np.array(all_embeddings), np.array(query_emb), chunks
+            proj_points = await asyncio.to_thread(
+                _compute_projection_points,
+                np.array(all_embeddings),
+                chunks,
+                body.projection,
+                body.n_clusters,
+                query_emb=np.array(query_emb),
             )
     else:
         results = await asyncio.to_thread(sparse_score, body.query, chunks, "bm25", body.top_k)
         results = [r for r in results if r["score"] >= body.threshold]
         scores = [r["score"] for r in results]
-        tsne_points = None
+        proj_points = None
 
     elapsed_ms = int((time.time() - t0) * 1000)
     return {
@@ -518,7 +560,7 @@ async def playground_query(body: QueryRequest):
         "elapsed_ms": elapsed_ms,
         "total": len(results),
         "scores": scores,
-        "tsne_points": tsne_points,
+        "tsne_points": proj_points,
     }
 
 
@@ -539,9 +581,9 @@ async def chunk_vs_chunk(body: ChunkVsChunkRequest):
     if len(chunks) < 2:
         raise HTTPException(400, "Need at least 2 chunks")
 
-    if body.strategy == "dense":
+    if body.strategy in ("dense", "hybrid"):
         if not body.model_id:
-            raise HTTPException(400, "model_id required for dense strategy")
+            raise HTTPException(400, "model_id required for dense/hybrid strategy")
         db = _db()
         models = db.list_models()
         providers = {p[0]: p for p in db.list_providers()}
@@ -557,12 +599,49 @@ async def chunk_vs_chunk(body: ChunkVsChunkRequest):
         embeddings = await asyncio.to_thread(
             _embed_with_cache, emb, chunks, pname, mname
         )
-        metric_fn = get_metric("cosine")
+        metric_fn = get_metric(body.metric)
         n = len(chunks)
         matrix = [
             [float(metric_fn(embeddings[i], embeddings[j])) for j in range(n)]
             for i in range(n)
         ]
+        # For hybrid mode, blend with BM25
+        if body.strategy == "hybrid":
+            from raglab.core.scorer import bm25_score, _normalize_scores
+            # Normalize dense matrix to [0,1]
+            dense_flat = []
+            for i in range(n):
+                for j in range(n):
+                    if i != j:
+                        dense_flat.append(matrix[i][j])
+            d_min = min(dense_flat) if dense_flat else 0
+            d_max = max(dense_flat) if dense_flat else 1
+            d_span = d_max - d_min if d_max != d_min else 1
+
+            # Build BM25 matrix
+            bm25_matrix = [[0.0] * n for _ in range(n)]
+            for i in range(n):
+                bm25_results = await asyncio.to_thread(bm25_score, chunks[i], chunks, n)
+                for r in bm25_results:
+                    bm25_matrix[i][r["index"]] = float(r["score"])
+            # Normalize BM25 matrix
+            b_flat = []
+            for i in range(n):
+                for j in range(n):
+                    if i != j:
+                        b_flat.append(bm25_matrix[i][j])
+            b_min = min(b_flat) if b_flat else 0
+            b_max = max(b_flat) if b_flat else 1
+            b_span = b_max - b_min if b_max != b_min else 1
+
+            w = body.hybrid_weight
+            for i in range(n):
+                for j in range(n):
+                    if i == j:
+                        continue
+                    d_norm = (matrix[i][j] - d_min) / d_span
+                    b_norm = (bm25_matrix[i][j] - b_min) / b_span
+                    matrix[i][j] = w * d_norm + (1 - w) * b_norm
     else:
         from raglab.core.scorer import bm25_score
         embeddings = []  # no embeddings for BM25
@@ -578,16 +657,17 @@ async def chunk_vs_chunk(body: ChunkVsChunkRequest):
     off_diag = [matrix[i][j] for i in range(n) for j in range(n) if i != j]
     avg_sim = float(sum(off_diag) / len(off_diag)) if off_diag else 0.0
     cohesion = float(sum(1 for s in off_diag if s >= 0.5) / len(off_diag) * 100) if off_diag else 0.0
-    tsne_points = None
-    if body.strategy == "dense" and len(chunks) >= 3:
-        tsne_points = await asyncio.to_thread(
-            _compute_cvc_tsne_points, np.array(embeddings), chunks
+    proj_points = None
+    if body.strategy in ("dense", "hybrid") and len(chunks) >= 3:
+        proj_points = await asyncio.to_thread(
+            _compute_projection_points,
+            np.array(embeddings), chunks, body.projection, body.n_clusters
         )
     return {
         "matrix": matrix, "labels": labels, "chunks": chunks,
         "off_diag_scores": off_diag,
         "avg_sim": round(avg_sim, 4), "cohesion": round(cohesion, 1),
-        "tsne_points": tsne_points,
+        "tsne_points": proj_points,
     }
 
 
@@ -619,42 +699,59 @@ def _make_distribution_chart(scores: list) -> Optional[str]:
     return _fig_to_b64(fig)
 
 
-def _compute_cvc_tsne_points(embeddings: np.ndarray, chunks: list) -> Optional[list]:
-    """t-SNE for chunk-vs-chunk view (no query point)."""
-    try:
-        from sklearn.manifold import TSNE
-        n = len(embeddings)
-        perplexity = min(30, max(2, n - 1))
-        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=300)
-        coords = tsne.fit_transform(embeddings)
-        return [
-            {"x": float(x), "y": float(y), "index": i,
-             "text": chunks[i] if i < len(chunks) else f"Chunk {i}", "type": "chunk"}
-            for i, (x, y) in enumerate(coords)
-        ]
-    except Exception:
-        return None
+def _cluster_points(coords: np.ndarray, n_clusters: int = 0) -> list[int]:
+    """Run K-Means on 2D coords. n_clusters=0 means auto (min(6, max(2, n//3)))."""
+    from sklearn.cluster import KMeans
+    n = len(coords)
+    if n_clusters <= 0:
+        n_clusters = min(6, max(2, n // 3))
+    if n < n_clusters:
+        n_clusters = max(2, n)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(coords)
+    return [int(l) for l in labels]
 
 
-def _compute_tsne_points(embeddings: np.ndarray, query_emb: np.ndarray, chunks: list) -> Optional[list]:
-    """Return t-SNE coordinates as JSON-serializable list for interactive frontend rendering."""
+def _compute_projection_points(
+    embeddings: np.ndarray,
+    chunks: list,
+    projection: str,
+    n_clusters: int = 0,
+    query_emb: np.ndarray | None = None,
+) -> Optional[list]:
+    """Project embeddings to 2D (t-SNE or UMAP), cluster, and return JSON points."""
     try:
-        from sklearn.manifold import TSNE
         n = len(embeddings)
-        perplexity = min(30, max(2, n - 1))
-        all_vecs = np.vstack([embeddings, query_emb.reshape(1, -1)])
-        tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=300)
-        coords = tsne.fit_transform(all_vecs)
+        has_query = query_emb is not None
+        vecs = np.vstack([embeddings, query_emb.reshape(1, -1)]) if has_query else embeddings
+
+        if projection == "umap":
+            from umap import UMAP
+            n_neighbors = min(15, max(2, n - 1))
+            reducer = UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42, metric="cosine")
+            coords = reducer.fit_transform(vecs)
+        else:
+            from sklearn.manifold import TSNE
+            perplexity = min(30, max(2, n - 1))
+            tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, max_iter=300)
+            coords = tsne.fit_transform(vecs)
+
+        # Cluster only chunk coordinates (exclude query if present)
+        chunk_coords = coords[:-1] if has_query else coords
+        labels = _cluster_points(chunk_coords, n_clusters)
+
         points = []
-        for i, (x, y) in enumerate(coords[:-1]):
-            points.append({
-                "x": float(x), "y": float(y),
-                "index": i,
-                "text": chunks[i] if i < len(chunks) else f"Chunk {i}",
-                "type": "chunk"
-            })
-        qx, qy = coords[-1]
-        points.append({"x": float(qx), "y": float(qy), "index": -1, "text": "Query", "type": "query"})
+        for i, (x, y) in enumerate(coords):
+            if has_query and i == len(coords) - 1:
+                points.append({"x": float(x), "y": float(y), "index": -1, "text": "Query", "type": "query", "cluster": -1})
+            else:
+                points.append({
+                    "x": float(x), "y": float(y),
+                    "index": i,
+                    "text": chunks[i] if i < len(chunks) else f"Chunk {i}",
+                    "type": "chunk",
+                    "cluster": labels[i],
+                })
         return points
     except Exception:
         return None

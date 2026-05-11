@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { fetchJson } from '../utils/api.js'
+import { useI18n } from '../utils/i18n.js'
+
+const { t } = useI18n()
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 const toast = ref('')
@@ -191,11 +194,11 @@ onMounted(() => {
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="material-symbols-outlined" style="color:var(--primary);">key</span>
-            <span style="font-size:16px;font-weight:700;">Provider Management</span>
+            <span style="font-size:16px;font-weight:700;">{{ t('settings.provider_management') }}</span>
           </div>
           <button class="rl-btn-secondary" @click="showAddProvider = !showAddProvider">
             <span class="material-symbols-outlined" style="font-size:14px;">add</span>
-            Add Provider
+            {{ t('settings.add_provider') }}
           </button>
         </div>
 
@@ -203,23 +206,23 @@ onMounted(() => {
         <div v-if="showAddProvider" style="background:var(--surface-low);border-radius:8px;padding:16px;margin-bottom:16px;display:flex;flex-direction:column;gap:10px;">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div>
-              <label class="rl-label" style="display:block;margin-bottom:4px;">Name</label>
+              <label class="rl-label" style="display:block;margin-bottom:4px;">{{ t('settings.name') }}</label>
               <input class="rl-input" placeholder="e.g. openai" v-model="newProvider.name" />
             </div>
             <div>
-              <label class="rl-label" style="display:block;margin-bottom:4px;">Base URL</label>
+              <label class="rl-label" style="display:block;margin-bottom:4px;">{{ t('settings.base_url') }}</label>
               <input class="rl-input" placeholder="https://api.openai.com/v1" v-model="newProvider.base_url" />
             </div>
           </div>
           <div>
-            <label class="rl-label" style="display:block;margin-bottom:4px;">API Key</label>
+            <label class="rl-label" style="display:block;margin-bottom:4px;">{{ t('settings.api_key') }}</label>
             <input class="rl-input" type="password" placeholder="sk-…" v-model="newProvider.api_key" />
           </div>
           <div style="display:flex;gap:8px;">
             <button class="rl-btn-primary" :disabled="savingProvider" @click="saveProvider" style="width:auto;padding:8px 24px;">
-              {{ savingProvider ? 'Saving…' : 'Save' }}
+              {{ savingProvider ? t('settings.saving') : t('settings.save') }}
             </button>
-            <button class="rl-btn-secondary" @click="showAddProvider = false">Cancel</button>
+            <button class="rl-btn-secondary" @click="showAddProvider = false">{{ t('settings.cancel') }}</button>
           </div>
         </div>
 
@@ -227,10 +230,10 @@ onMounted(() => {
         <table class="rl-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Base URL</th>
-              <th>API Key</th>
-              <th>Actions</th>
+              <th>{{ t('settings.name') }}</th>
+              <th>{{ t('settings.base_url') }}</th>
+              <th>{{ t('settings.api_key') }}</th>
+              <th>{{ t('settings.actions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -245,7 +248,7 @@ onMounted(() => {
               </td>
             </tr>
             <tr v-if="!providers.length">
-              <td colspan="4" style="text-align:center;color:var(--on-surface-variant);">No providers configured.</td>
+              <td colspan="4" style="text-align:center;color:var(--on-surface-variant);">{{ t('settings.no_providers') }}</td>
             </tr>
           </tbody>
         </table>
@@ -256,11 +259,11 @@ onMounted(() => {
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
           <div style="display:flex;align-items:center;gap:8px;">
             <span class="material-symbols-outlined" style="color:var(--primary);">model_training</span>
-            <span style="font-size:16px;font-weight:700;">Model Management</span>
+            <span style="font-size:16px;font-weight:700;">{{ t('settings.model_management') }}</span>
           </div>
           <button class="rl-btn-secondary" @click="showAddModel = !showAddModel">
             <span class="material-symbols-outlined" style="font-size:14px;">add</span>
-            Add Model
+            {{ t('settings.add_model') }}
           </button>
         </div>
 
@@ -268,16 +271,16 @@ onMounted(() => {
         <div v-if="showAddModel" style="background:var(--surface-low);border-radius:8px;padding:16px;margin-bottom:16px;display:flex;flex-direction:column;gap:10px;">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div>
-              <label class="rl-label" style="display:block;margin-bottom:4px;">Provider</label>
+              <label class="rl-label" style="display:block;margin-bottom:4px;">{{ t('settings.provider') }}</label>
               <select class="rl-select" v-model="newModel.provider_name" @change="onProviderChange">
-                <option value="">Select provider…</option>
+                <option value="">{{ t('settings.select_provider') }}</option>
                 <option v-for="p in providers" :key="p.name" :value="p.name">{{ p.name }}</option>
               </select>
             </div>
             <div>
-              <label class="rl-label" style="display:block;margin-bottom:4px;">Model Name</label>
+              <label class="rl-label" style="display:block;margin-bottom:4px;">{{ t('settings.model_name') }}</label>
               <select v-if="newModel.provider_name === 'openrouter'" class="rl-select" v-model="newModel.model_name">
-                <option value="">Select model…</option>
+                <option value="">{{ t('settings.select_model') }}</option>
                 <option v-for="m in openrouterModels" :key="m.id" :value="m.id">
                   {{ m.name }} ({{ m.id }})
                 </option>
@@ -286,13 +289,13 @@ onMounted(() => {
             </div>
           </div>
           <div v-if="newModel.provider_name === 'openrouter' && loadingOpenrouterModels" style="font-size:12px;color:var(--on-surface-variant);">
-            Loading models…
+            {{ t('settings.loading_models') }}
           </div>
           <div style="display:flex;gap:8px;">
             <button class="rl-btn-primary" :disabled="savingModel" @click="saveModel" style="width:auto;padding:8px 24px;">
-              {{ savingModel ? 'Saving…' : 'Save' }}
+              {{ savingModel ? t('settings.saving') : t('settings.save') }}
             </button>
-            <button class="rl-btn-secondary" @click="showAddModel = false">Cancel</button>
+            <button class="rl-btn-secondary" @click="showAddModel = false">{{ t('settings.cancel') }}</button>
           </div>
         </div>
 
@@ -300,10 +303,10 @@ onMounted(() => {
         <table class="rl-table">
           <thead>
             <tr>
-              <th>Model Name</th>
-              <th>Provider</th>
-              <th>Type</th>
-              <th>Actions</th>
+              <th>{{ t('settings.model_name') }}</th>
+              <th>{{ t('settings.provider') }}</th>
+              <th>{{ t('settings.type') }}</th>
+              <th>{{ t('settings.actions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -321,11 +324,11 @@ onMounted(() => {
                   <span
                     class="material-symbols-outlined"
                     style="font-size:13px;"
-                    :style="{ color: testingModel[m.id] === 'ok' ? 'var(--secondary)' : testingModel[m.id] === 'fail' ? 'var(--error)' : '' }"
+                    :style="{ color: testingModel[m.id] === 'ok' ? 'var(--accent-green)' : testingModel[m.id] === 'fail' ? 'var(--error)' : '' }"
                   >
                     {{ testingModel[m.id] === 'ok' ? 'check_circle' : testingModel[m.id] === 'fail' ? 'error' : 'play_arrow' }}
                   </span>
-                  {{ testingModel[m.id] === 'testing' ? 'Testing…' : 'Test' }}
+                  {{ testingModel[m.id] === 'testing' ? t('settings.testing') : t('settings.test') }}
                 </button>
                 <button class="rl-btn-icon" @click="deleteModel(m.id)" title="Delete">
                   <span class="material-symbols-outlined" style="font-size:16px;">delete</span>
@@ -333,7 +336,7 @@ onMounted(() => {
               </td>
             </tr>
             <tr v-if="!models.length">
-              <td colspan="4" style="text-align:center;color:var(--on-surface-variant);">No models configured.</td>
+              <td colspan="4" style="text-align:center;color:var(--on-surface-variant);">{{ t('settings.no_models') }}</td>
             </tr>
           </tbody>
         </table>
@@ -343,24 +346,24 @@ onMounted(() => {
       <div class="rl-card">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
           <span class="material-symbols-outlined" style="color:var(--primary);">sliders</span>
-          <span style="font-size:16px;font-weight:700;">Default Parameters</span>
+          <span style="font-size:16px;font-weight:700;">{{ t('settings.default_parameters') }}</span>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
           <div>
-            <label class="rl-label" style="display:block;margin-bottom:6px;">Chunk Size</label>
+            <label class="rl-label" style="display:block;margin-bottom:6px;">{{ t('settings.chunk_size') }}</label>
             <input class="rl-input" type="number" min="64" max="4096" v-model.number="config.chunk_size" />
           </div>
           <div>
-            <label class="rl-label" style="display:block;margin-bottom:6px;">Overlap</label>
+            <label class="rl-label" style="display:block;margin-bottom:6px;">{{ t('settings.overlap') }}</label>
             <input class="rl-input" type="number" min="0" max="512" v-model.number="config.overlap" />
           </div>
           <div>
-            <label class="rl-label" style="display:block;margin-bottom:6px;">Top-K</label>
+            <label class="rl-label" style="display:block;margin-bottom:6px;">{{ t('settings.top_k') }}</label>
             <input class="rl-input" type="number" min="1" max="100" v-model.number="config.top_k" />
           </div>
           <div>
-            <label class="rl-label" style="display:block;margin-bottom:6px;">Default Metric</label>
+            <label class="rl-label" style="display:block;margin-bottom:6px;">{{ t('settings.default_metric') }}</label>
             <select class="rl-select" v-model="config.default_metric">
               <option value="cosine">Cosine</option>
               <option value="euclidean">Euclidean</option>
@@ -372,7 +375,7 @@ onMounted(() => {
 
         <button class="rl-btn-primary" :disabled="savingConfig" @click="saveConfig" style="width:auto;padding:8px 24px;">
           <span class="material-symbols-outlined" style="font-size:16px;">save</span>
-          {{ savingConfig ? 'Saving…' : 'Save Changes' }}
+          {{ savingConfig ? t('settings.saving') : t('settings.save_changes') }}
         </button>
       </div>
 

@@ -274,3 +274,62 @@ def sparse_score(
         raise ValueError(
             f"Unknown algorithm: {algorithm}. Valid algorithms: ['bm25', 'tfidf']"
         )
+
+
+def _normalize_scores(results: List[Dict]) -> List[Dict]:
+    """Min-max normalize scores to [0, 1] for hybrid combination."""
+    if not results:
+        return results
+    scores = [r["score"] for r in results]
+    min_s, max_s = min(scores), max(scores)
+    span = max_s - min_s
+    if span == 0:
+        return [{**r, "score": 1.0 / len(results)} for r in results]
+    return [{**r, "score": (r["score"] - min_s) / span} for r in results]
+
+
+def hybrid_score(
+    query: str,
+    chunks: List[str],
+    embedder: Embedder,
+    metric: str,
+    top_k: int,
+    dense_weight: float = 0.5,
+) -> List[Dict]:
+    """Combine dense embedding similarity with BM25 using weighted fusion.
+
+    Scores from each method are min-max normalized to [0, 1] before blending.
+
+    Args:
+        query: Query string
+        chunks: List of text chunks to score
+        embedder: Embedder instance
+        metric: Similarity metric for dense scoring (e.g. "cosine")
+        top_k: Number of top results to return
+        dense_weight: Weight for dense scores (0 = pure BM25, 1 = pure dense)
+
+    Returns:
+        List of dicts with "index", "score", "text", sorted descending
+    """
+    logger.info(f"Hybrid scoring: query='{query[:50]}...', chunks={len(chunks)}, dense_weight={dense_weight}")
+
+    dense_results = dense_score(query, chunks, embedder, metric, top_k=len(chunks))
+    bm25_results = bm25_score(query, chunks, top_k=len(chunks))
+
+    dense_norm = _normalize_scores(dense_results)
+    bm25_norm = _normalize_scores(bm25_results)
+
+    # Build lookup by index
+    dense_map = {r["index"]: r["score"] for r in dense_norm}
+    bm25_map = {r["index"]: r["score"] for r in bm25_norm}
+
+    combined = []
+    for idx, chunk in enumerate(chunks):
+        d = dense_map.get(idx, 0.0)
+        b = bm25_map.get(idx, 0.0)
+        score = dense_weight * d + (1 - dense_weight) * b
+        combined.append({"index": idx, "score": score, "text": chunk})
+
+    combined.sort(key=lambda x: x["score"], reverse=True)
+    logger.info(f"Hybrid scoring completed, returning top {top_k}")
+    return combined[:top_k]

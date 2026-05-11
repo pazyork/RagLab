@@ -42,17 +42,26 @@ onBeforeUnmount(() => {
 function openModal() {
   showModal.value = true
   nextTick(() => {
-    if (modalEl.value && !modalInstance) {
-      modalInstance = initChart(modalEl.value)
-    } else if (modalInstance && props.option) {
+    if (!modalEl.value) return
+    // Always recreate because v-if destroys the DOM element when closed
+    modalInstance?.dispose()
+    modalInstance = echarts.init(modalEl.value, null, { renderer: 'canvas' })
+    if (props.option) {
       modalInstance.setOption(props.option, true)
     }
-    setTimeout(() => modalInstance?.resize(), 50)
+    // Allow the browser to paint so the container has real dimensions
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        modalInstance?.resize()
+      })
+    })
   })
 }
 
 function closeModal() {
   showModal.value = false
+  modalInstance?.dispose()
+  modalInstance = null
 }
 
 function download() {
